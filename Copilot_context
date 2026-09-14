@@ -1,0 +1,77 @@
+PROJECT PURPOSE
+---------------
+This project implements an end-to-end customer churn analytics system suitable
+for an Associate Data / Data Science role.
+
+The goal is to demonstrate:
+- Clean Python ETL
+- Feature engineering
+- Machine learning modeling
+- MySQL as an analytics database
+- Power BI for business consumption
+
+ARCHITECTURE (NON-NEGOTIABLE)
+-----------------------------
+Raw CSV
+  → Python ingestion
+  → MySQL table: customers_raw
+  → Python feature engineering
+  → MySQL table: customer_features
+  → Python ML model (XGBoost / RandomForest)
+  → MySQL table: churn_predictions
+  → Power BI dashboard
+
+BOUNDARIES (VERY IMPORTANT)
+---------------------------
+- NO modeling inside Power BI
+- NO business logic inside notebooks
+- NO direct CSV consumption by Power BI
+- MySQL is the single source of truth
+- All ML logic lives in Python scripts
+
+FILE RESPONSIBILITIES
+---------------------
+config.py     → constants only (DB names, table names, paths)
+utils.py      → DB engine + helpers (NO business logic)
+ingest.py     → CSV → customers_raw
+features.py   → customers_raw → customer_features
+train.py      → train & evaluate model, save to disk
+score.py      → score customers, write churn_predictions
+run_pipeline.py → orchestrate steps in order
+
+QUALITY RULES
+-------------
+- Code must be deterministic and re-runnable
+- Explicit validation preferred over silent failure
+- Clear variable and function names
+- Avoid clever abstractions
+- Readability > performance
+
+ML REQUIREMENTS
+---------------
+- Use train/validation split
+- Use ROC-AUC as primary metric
+- Report precision/recall
+- Handle class imbalance explicitly
+- Save model artifact
+
+DATABASE RULES
+--------------
+- Explicit schemas
+- Primary keys required
+- No SELECT *
+- No JSON blobs
+
+POWER BI RULES
+--------------
+- Connect ONLY to churn_predictions table
+- KPIs must be business-oriented
+- Avoid excessive calculated columns
+
+COPILOT USAGE
+-------------
+- Copilot is used for boilerplate and speed
+- Architecture and logic decisions are human-driven
+- Reject outputs that violate this document
+
+If any generated code violates these rules, it must be rewritten.
