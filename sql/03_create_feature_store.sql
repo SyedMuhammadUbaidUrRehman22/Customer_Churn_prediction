@@ -1,0 +1,27 @@
+CREATE TABLE IF NOT EXISTS feature_store (
+    customer_id VARCHAR(20) NOT NULL,
+    feature_set_version VARCHAR(30) NOT NULL,
+    gender VARCHAR(10) NOT NULL,
+    senior_citizen TINYINT(1) NOT NULL,
+    partner TINYINT(1) NOT NULL,
+    dependents TINYINT(1) NOT NULL,
+    tenure_months SMALLINT UNSIGNED NOT NULL,
+    phone_service TINYINT(1) NOT NULL,
+    multiple_lines VARCHAR(20) NOT NULL,
+    internet_service VARCHAR(20) NOT NULL,
+    online_security VARCHAR(20) NOT NULL,
+    online_backup VARCHAR(20) NOT NULL,
+    device_protection VARCHAR(20) NOT NULL,
+    tech_support VARCHAR(20) NOT NULL,
+    streaming_tv VARCHAR(20) NOT NULL,
+    streaming_movies VARCHAR(20) NOT NULL,
+    contract VARCHAR(20) NOT NULL,
+    paperless_billing TINYINT(1) NOT NULL,
+    payment_method VARCHAR(30) NOT NULL,
+    monthly_charges DECIMAL(10, 2) NOT NULL,
+    total_charges DECIMAL(10, 2) NULL,
+    PRIMARY KEY (customer_id, feature_set_version),
+    CONSTRAINT fk_feature_store_customer
+        FOREIGN KEY (customer_id) REFERENCES customers_raw(customer_id)
+        ON DELETE CASCADE
+);

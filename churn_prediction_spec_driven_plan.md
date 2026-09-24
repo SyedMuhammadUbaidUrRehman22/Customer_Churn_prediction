@@ -156,8 +156,14 @@ CREATE TABLE feature_store (
 );
 ```
 
+For the available flat snapshot, `feature_store` version `telco_snapshot_v1` contains the 19 supplied non-label customer, service, contract, and billing fields. It excludes `churned`, ingestion metadata, and customer identifiers from the predictor list. The 11 missing `total_charges` values remain null for explicit model-pipeline imputation. As with the v1 labels, no `observation_date` is fabricated; dated rolling-window features remain blocked on dated event sources.
+
 ### 4.3 Label Definition
 Define explicitly and document in the spec, e.g.: *"Churned = subscription status becomes 'cancelled' within 30 days after observation_date, and was 'active' at observation_date."* Every feature row must join to exactly one label row on `(customer_id, observation_date)`.
+
+#### Dataset-specific v1 decision
+
+The available Telco snapshot contains a supplied binary `Churn` outcome but no event or snapshot dates. Phase 2 therefore materializes that outcome as label version `telco_snapshot_v1`, sourced from `customers_raw.churned`. `observation_date` and `label_window_end` remain null rather than inventing temporal evidence. This supports a reproducible benchmark model only; it does not satisfy the production future-window definition or permit a genuine time-based holdout. Dated subscription and churn events are required before making either claim.
 
 ---
 
