@@ -21,3 +21,15 @@ FEATURE_SET_VERSION = "telco_snapshot_v1"
 MAX_CONNECTIONS = 20
 TIMEOUT_SECONDS = 30
 
+BUSINESS_SCHEMA_PATH = PROJECT_ROOT / "sql" / "06_create_business_validation.sql"
+TABLE_BUSINESS_VALIDATION = "business_validation"
+# None means unresolved. Configuring a criterion never grants stakeholder approval.
+BUSINESS_ACCEPTANCE = {
+    "pr_auc_min": None,
+    "precision_at_k_min": None,
+    "outreach_capacity": None,
+    "refresh_cadence": None,
+    "feature_importance_max": 0.5,  # Existing SDD diagnostic guardrail.
+    "stakeholder_approved": False,
+}
+

@@ -4,7 +4,7 @@
 
 A Python + MySQL churn project developed against a [spec-driven plan](churn_prediction_spec_driven_plan.md). It includes ingestion, labels, 19 predictors, an evaluated XGBoost snapshot benchmark, and MySQL model registration and benchmark scoring.
 
-**Current scope:** through Phase 5 (benchmark only) · **Dataset:** Telco customer snapshot · **Version:** `telco_snapshot_v1`
+**Current scope:** through Phase 6 analysis (benchmark only; business acceptance pending) · **Dataset:** Telco customer snapshot · **Version:** `telco_snapshot_v1`
 
 [Quick start](#quick-start) · [Pipeline](#explore-the-pipeline) · [Data dictionary](#data-dictionary) · [Verification](#verify-results) · [Review](#review-findings) · [Roadmap](#roadmap)
 
@@ -169,6 +169,7 @@ Customer ID is stored for joins but excluded from `FEATURE_COLUMNS`. The target 
 | `feature_store` | `customer_id`, `feature_set_version` | Versioned predictor values | 7,043 |
 | `model_registry` | `model_id` | Unapproved benchmark, metrics, artifact identity | 1 |
 | `model_predictions` | `customer_id`, `model_id`, `scoring_mode` | Latest benchmark scores per model | 7,043 |
+| `business_validation` | `validation_id`; unique analysis hash + N | Pending business-review scenarios | 4 |
 
 <details>
 <summary><strong>Expand all 19 predictor definitions</strong></summary>
@@ -208,7 +209,7 @@ The 11 missing total-charge values are preserved in MySQL. Training uses train-o
 .\venv\Scripts\python.exe -m src.ingest --validate-only
 ```
 
-Current result: **10 local tests passed**, plus **1 opt-in MySQL integration test passed**. Coverage includes label-free scoring validation, artifact tampering, tier boundaries, production refusal, training-to-registry ordering, and prediction rollback/model isolation, alongside Phase 1–4 checks. Raw ingestion rollback and all invalid-input cases are not covered.
+Current result: **14 local tests passed**; both MySQL tests are opt-in. Phase 6's MySQL integration passed in this iteration; Phase 5's passed in its recorded iteration. Coverage includes business scenario formulas, deterministic ranking, pending approval, stale/mismatched sources, artifact tampering, tier boundaries, production refusal, training-to-registry ordering, and prediction rollback/model isolation. Raw ingestion rollback and all invalid-input cases are not covered.
 
 The live integration check registers and scores the trusted benchmark in the configured development database. It verifies reruns and rollback, and leaves completed benchmark scores available:
 
@@ -323,7 +324,7 @@ Inspect row counts in all three tables before using their contents. Raw ingestio
 | 3 · Features | 19 snapshot predictors materialized | Review findings; temporal features and leakage validation |
 | 4 · Modeling | XGBoost snapshot benchmark trained and evaluated | Temporal data and stakeholder acceptance gates |
 | 5 · Registry and scoring | Unapproved model registered; 7,043 benchmark scores stored | Approved temporal model, active-customer source, business tiers |
-| 6 · Business validation | Not started | Outreach capacity, costs, and stakeholder sign-off |
+| 6 · Business validation | Reproducible report, ranked customers, scenario analysis, pending MySQL records | Stakeholder thresholds, capacity, costs, cadence, and sign-off remain unresolved |
 | 7 · Deployment | Not started | Scheduling, alerting, and rollback validation |
 | 8 · Monitoring | Not started | Realized outcomes, drift metrics, retraining policy |
 
@@ -347,6 +348,16 @@ Test average precision **0.6588** (prevalence baseline **0.2654**), ROC-AUC **0.
 Runs save `model.json`, `preprocessor.joblib`, `report.json`, and `splits.csv`. Run directories are ignored by Git; the evaluation report is versioned. Only load trusted joblib artifacts. The threshold maximizes validation F1 and is not a business outreach rule. Registration is optional and never approves the benchmark.
 
 </details>
+
+### Review business-validation scenarios
+
+```powershell
+.\venv\Scripts\python.exe -m src.business_validation --model-id xgb_9ee0132da5749c7e72124a8c --save
+```
+
+This writes a Markdown report, exact JSON, and ranked customer CSV under `models/phase6_business_validation/`, and saves four pending outreach scenarios in `business_validation`. Omit `--save` for database reads only; use repeatable `--top-k N` for additional scenarios and `--report-path PATH.md` for another output location.
+
+The report distinguishes saved held-out metrics from full-snapshot outreach/tier statistics, which include training customers. Candidate business criteria live in `BUSINESS_ACCEPTANCE` in `src/config.py`; unresolved values are `None`. Configured criteria never approve the benchmark. See the [Phase 6 workflow and validation evidence](docs/phase_6_business_validation.md) for formulas, persistence, stakeholder decisions, and blockers before Phase 7.
 
 ### Register and score the benchmark
 

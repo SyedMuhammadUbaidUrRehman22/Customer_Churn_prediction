@@ -183,3 +183,33 @@ Append one entry after every implementation iteration. Record what changed, deci
 - Provisional high boundary is the validation-F1 threshold (0.59137362241745), medium starts at half that threshold (0.295686811208725); Phase 6 must review outreach criteria and tiers. Scores are not claimed to be calibrated future probabilities.
 - Predictions retain only the latest batch per model/mode and survive raw snapshot refreshes; they can therefore be stale until rescored. Timestamp and feature hash identify their source snapshot. Local artifacts must remain available at their registered location.
 - Existing upstream findings R1/R2/R4/R5/R6 remain open. Phase 6 business acceptance and foundation fixes are next; million-customer SLA, deployment, and monitoring are not delivered. `run_pipeline.py` remains the Phase 1–3 refresh command.
+
+## Iteration 7 — 2026-09-25 — Phase 6 business validation
+
+### Work completed
+
+- Read the full SDD and memory; inspected implementation, schemas, tests, trusted model artifacts, live registry, predictions, and labels before coding.
+- Added `src.business_validation` with deterministic score/customer-ID ranking, top-1/5/10/20% and custom-N scenarios, precision/recall/cumulative capture, and provisional tier counts and churn rates. Reused Phase 5 tier rules and persisted Phase 4 test metrics without retraining or rescoring.
+- Added Markdown, exact JSON, and ranked CSV report generation. The default live artifacts are in `models/phase6_business_validation/`; a separate custom N=100 report is in `models/phase6_custom/`.
+- Added the explicit `business_validation` MySQL schema and optional immutable, repeatable pending-record persistence. Four scenario records are stored; duplicate scenario Ns share a record within an analysis.
+- Added unresolved business criteria to the existing `src.config` module, focused local and opt-in MySQL regressions, the Phase 6 workflow document, README updates, and a narrow SDD snapshot amendment.
+
+### Decisions and constraints
+
+- PR-AUC minimum, precision@K minimum, stakeholder outreach capacity, and refresh cadence remain unresolved. The existing SDD 0.5 feature-importance guardrail remains diagnostic. CLI custom Ns are scenarios, not stakeholder decisions.
+- Full-snapshot outreach and tier statistics include training customers and are explicitly distinguished from saved held-out metrics. Labels remain the supplied Telco Churn outcome; no dates, future-window labels, calibrated future probabilities, active cohort, costs, or stakeholder decisions were fabricated.
+- Business and stakeholder status remain pending. Configuration cannot grant approval; the database rejects benchmark approval. The registered benchmark remains `approved=false`.
+- Consistent reads require exact customer coverage, one score batch, Phase 5 tier consistency, a matching feature snapshot hash, and the evaluated feature/label dataset hash. Reports retain source hashes and scoring time; repeat saves preserve first-persistence date and timestamp.
+- No dependencies were added. Phase 4/5 behavior and raw/label/feature/prediction data were unchanged. Deployment, orchestration, monitoring, retraining automation, and the existing upstream findings remain outside this iteration.
+
+### Validation
+
+- Local suite: 14 tests passed, with both opt-in MySQL tests skipped by default. Focused checks cover ranking ties, formulas, tier totals/boundaries, unresolved criteria, approval refusal, missing models, mismatched coverage, stale scores, changed labels, dated labels, mixed score timestamps, and deterministic reruns.
+- Live MySQL source: one unapproved benchmark model, 7,043 unique benchmark predictions and labels, 1,869 churners, and no observation/window dates. Registered artifacts verified successfully.
+- Default CLI with `--save` succeeded. Top 1/5/10/20% selected 71/353/705/1,409 customers and captured 67/309/550/969 supplied churners. High/medium/low tier counts were 2,320/1,816/2,907.
+- Phase 6 opt-in MySQL integration passed: two runs produced byte-identical report artifacts, four unique pending records, and exact equality between persisted values and report-derived rows. The benchmark stakeholder-approval attempt was rejected and rolled back; registry approval and prediction rows remained unchanged.
+- Default analysis SHA-256: `cf44c4f6de4abc889fd72f0c6f4e37e5b8b80df0dc3a3ddf0a39852e8623e526`. The custom N=100 CLI also succeeded without persisting extra scenarios.
+
+### Next step
+
+- The Phase 6 analysis layer is implemented, but actual business acceptance remains blocked on stakeholder metric thresholds, outreach capacity/costs, cadence, tier policy, and documented sign-off. Obtain these decisions and the dated features/events, future-window labels, temporal evaluation, and verified active cohort required for production approval before proceeding to Phase 7 deployment; address the outstanding foundation findings as well.

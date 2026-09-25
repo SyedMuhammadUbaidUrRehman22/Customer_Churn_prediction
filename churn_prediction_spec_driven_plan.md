@@ -225,6 +225,12 @@ Define concrete numeric gates before training starts (fill in with stakeholders)
 
 ---
 
+### 6.4 Phase 6 snapshot business-validation implementation (2026-09-25)
+
+`python -m src.business_validation --model-id ID` analyzes persisted benchmark scores and snapshot labels, preserving Phase 4 held-out metrics and Phase 5 provisional tiers. Full-snapshot top-1/5/10/20% and optional custom-N scenarios are descriptive statistics that include training customers, not new holdout evidence. The report exports exact values and deterministic customer rankings; optional `--save` records pending scenarios in `business_validation` with source hashes and typed fields.
+
+`BUSINESS_ACCEPTANCE` in `src/config.py` leaves stakeholder metric minima, outreach capacity, and cadence unresolved. The existing 50% feature-importance guardrail remains diagnostic. No configuration or Phase 6 command grants stakeholder or production approval. Actual business acceptance remains blocked on stakeholder decisions and the production evidence described above; this implementation does not advance deployment or change the benchmark's `approved=false` state. See `docs/phase_6_business_validation.md` for the workflow and evidence.
+
 ## 7. System Architecture
 
 ### Phase 5 snapshot implementation (2026-09-25)
