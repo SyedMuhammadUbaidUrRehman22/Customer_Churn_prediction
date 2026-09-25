@@ -2,9 +2,9 @@
 
 ### From a Telco customer snapshot to validated MySQL labels and features
 
-A Python + MySQL churn project developed against a [spec-driven plan](churn_prediction_spec_driven_plan.md). It now includes ingestion, labels, 19 predictors, and an evaluated XGBoost snapshot benchmark. Registry and scoring remain future phases.
+A Python + MySQL churn project developed against a [spec-driven plan](churn_prediction_spec_driven_plan.md). It includes ingestion, labels, 19 predictors, an evaluated XGBoost snapshot benchmark, and MySQL model registration and benchmark scoring.
 
-**Current scope:** through Phase 4 (benchmark only) · **Dataset:** Telco customer snapshot · **Version:** `telco_snapshot_v1`
+**Current scope:** through Phase 5 (benchmark only) · **Dataset:** Telco customer snapshot · **Version:** `telco_snapshot_v1`
 
 [Quick start](#quick-start) · [Pipeline](#explore-the-pipeline) · [Data dictionary](#data-dictionary) · [Verification](#verify-results) · [Review](#review-findings) · [Roadmap](#roadmap)
 
@@ -123,6 +123,10 @@ flowchart LR
     RAW --> FEATURES[(feature_store)]
     LABELS --> TRAIN[XGBoost snapshot benchmark]
     FEATURES --> TRAIN
+    TRAIN --> REGISTRY[(model_registry)]
+    REGISTRY --> SCORE[Explicit benchmark scoring]
+    FEATURES --> SCORE
+    SCORE --> PREDICTIONS[(model_predictions)]
 ```
 
 The orchestrator runs **ingestion → labeling → features**. Both derived tables read the raw table. Each materializer uses its own transaction.
@@ -163,6 +167,8 @@ Customer ID is stored for joins but excluded from `FEATURE_COLUMNS`. The target 
 | `customers_raw` | `customer_id` | Validated snapshot plus supplied outcome | 7,043 |
 | `churn_labels` | `customer_id`, `label_version` | Versioned snapshot outcome and provenance | 7,043 |
 | `feature_store` | `customer_id`, `feature_set_version` | Versioned predictor values | 7,043 |
+| `model_registry` | `model_id` | Unapproved benchmark, metrics, artifact identity | 1 |
+| `model_predictions` | `customer_id`, `model_id`, `scoring_mode` | Latest benchmark scores per model | 7,043 |
 
 <details>
 <summary><strong>Expand all 19 predictor definitions</strong></summary>
@@ -202,7 +208,15 @@ The 11 missing total-charge values are preserved in MySQL. Training uses train-o
 .\venv\Scripts\python.exe -m src.ingest --validate-only
 ```
 
-Current result: **5 tests passed**. Coverage includes the real dataset, duplicate IDs, label/feature gates, training validation, deterministic disjoint splits, train-only imputation, artifact reload equivalence, and driver timeout selection. Database rollback and all invalid-input cases are not covered.
+Current result: **10 local tests passed**, plus **1 opt-in MySQL integration test passed**. Coverage includes label-free scoring validation, artifact tampering, tier boundaries, production refusal, training-to-registry ordering, and prediction rollback/model isolation, alongside Phase 1–4 checks. Raw ingestion rollback and all invalid-input cases are not covered.
+
+The live integration check registers and scores the trusted benchmark in the configured development database. It verifies reruns and rollback, and leaves completed benchmark scores available:
+
+```powershell
+$env:RUN_MYSQL_TESTS = '1'
+.\venv\Scripts\python.exe -m unittest discover -s tests -p test_phase5_mysql.py -v
+Remove-Item Env:RUN_MYSQL_TESTS
+```
 
 ### Database checks
 
@@ -308,7 +322,7 @@ Inspect row counts in all three tables before using their contents. Raw ingestio
 | 2 · Labeling | Supplied snapshot outcome materialized | Dated churn events and agreed future-window definition |
 | 3 · Features | 19 snapshot predictors materialized | Review findings; temporal features and leakage validation |
 | 4 · Modeling | XGBoost snapshot benchmark trained and evaluated | Temporal data and stakeholder acceptance gates |
-| 5 · Registry and scoring | Not started | Trained and evaluated model |
+| 5 · Registry and scoring | Unapproved model registered; 7,043 benchmark scores stored | Approved temporal model, active-customer source, business tiers |
 | 6 · Business validation | Not started | Outreach capacity, costs, and stakeholder sign-off |
 | 7 · Deployment | Not started | Scheduling, alerting, and rollback validation |
 | 8 · Monitoring | Not started | Realized outcomes, drift metrics, retraining policy |
@@ -323,14 +337,55 @@ With `DATABASE_URI` configured and Phase 1–3 tables populated:
 .\venv\Scripts\python.exe -m src.train
 ```
 
-This reads MySQL without refreshing the tables. Optional `--trials 8` and `--output-dir models/my_run` control candidate count and a new output directory; existing directories are rejected.
+This reads MySQL without refreshing the input tables. Optional `--trials 8` and `--output-dir models/my_run` control candidate count and a new output directory; existing directories are rejected. Add `--register` to register the completed evaluation as an unapproved benchmark.
 
 <details>
 <summary><strong>Phase 4 results and artifacts</strong></summary>
 
 Test average precision **0.6588** (prevalence baseline **0.2654**), ROC-AUC **0.8454**, precision **0.5899**, recall **0.7193**, Brier **0.1642**. These describe a non-temporal benchmark, not a future churn forecast.
 
-Runs save `model.json`, `preprocessor.joblib`, `report.json`, and `splits.csv`. Run directories are ignored by Git; the evaluation report is versioned. Only load trusted joblib artifacts. The threshold maximizes validation F1 and is not a business outreach rule. No model is approved or registered.
+Runs save `model.json`, `preprocessor.joblib`, `report.json`, and `splits.csv`. Run directories are ignored by Git; the evaluation report is versioned. Only load trusted joblib artifacts. The threshold maximizes validation F1 and is not a business outreach rule. Registration is optional and never approves the benchmark.
+
+</details>
+
+### Register and score the benchmark
+
+With `DATABASE_URI` configured, register an existing trusted training output:
+
+```powershell
+.\venv\Scripts\python.exe -m src.registry --artifact-dir models/phase4_benchmark_verified
+```
+
+Use the returned model ID. The verified Phase 4 model's ID is `xgb_9ee0132da5749c7e72124a8c`:
+
+```powershell
+.\venv\Scripts\python.exe -m src.score --benchmark --model-id xgb_9ee0132da5749c7e72124a8c
+```
+
+This stores 7,043 labeled benchmark scores in MySQL. `python -m src.score` without benchmark mode refuses production scoring. The source has no verified active-customer population, and the model remains `approved=0`. See [Phase 5 validation](docs/phase_5_registry_scoring.md).
+
+<details>
+<summary><strong>Inspect the registry and benchmark scores</strong></summary>
+
+```sql
+SELECT model_id, trained_at, evaluation_scope, approved, pr_auc,
+       low_threshold, high_threshold, artifact_path
+FROM model_registry ORDER BY trained_at DESC;
+
+SELECT scoring_mode, risk_tier, COUNT(*) AS customers
+FROM model_predictions
+WHERE model_id = 'xgb_9ee0132da5749c7e72124a8c'
+GROUP BY scoring_mode, risk_tier;
+
+SELECT customer_id, churn_probability, risk_tier, scored_at
+FROM model_predictions
+WHERE model_id = 'xgb_9ee0132da5749c7e72124a8c' AND scoring_mode = 'benchmark'
+ORDER BY churn_probability DESC, customer_id LIMIT 20;
+```
+
+Provisional risk policy: low below 0.295687, medium from there to below 0.591374, high at or above 0.591374 (displayed boundaries rounded). These tiers are not approved outreach decisions. Full-snapshot scores include training customers and must not be used as new holdout evaluation.
+
+Reruns replace only that model's benchmark scores atomically. A failure preserves its previous scores. Source-table refreshes do not delete predictions: use score time and `feature_snapshot_sha256` to identify the saved batch, and rerun scoring after a refresh. The application does not retain every historical scoring run.
 
 </details>
 
@@ -343,7 +398,9 @@ churn-analytics/
 ├── sql/
 │   ├── 01_create_tables.sql        Raw table
 │   ├── 02_create_labels.sql        Snapshot labels
-│   └── 03_create_feature_store.sql Snapshot predictors
+│   ├── 03_create_feature_store.sql Snapshot predictors
+│   ├── 04_create_model_registry.sql Model audit records
+│   └── 05_create_model_predictions.sql Scored benchmark rows
 ├── src/
 │   ├── config.py                  Paths, versions, environment lookup
 │   ├── utils.py                   SQLAlchemy engine helper
@@ -351,8 +408,9 @@ churn-analytics/
 │   ├── labels.py                  Label materialization
 │   ├── features.py                Feature materialization
 │   ├── train.py                   XGBoost benchmark and evaluation
-│   └── score.py                   Empty placeholder
-├── tests/                         Five regression tests
+│   ├── registry.py                Artifact verification and registration
+│   └── score.py                   Gated snapshot batch scoring
+├── tests/                         Local regressions and opt-in MySQL integration
 ├── docs/phase_0_3_review.md         Review and evidence
 ├── run_pipeline.py                Phase 1–3 orchestration
 ├── requirements.txt               Pinned runtime dependencies
@@ -360,7 +418,7 @@ churn-analytics/
 └── memory.md                      Implementation history
 ```
 
-The user-directed [SDD Markdown plan](churn_prediction_spec_driven_plan.md) guides this work. [Copilot_context](Copilot_context) retains older table names (`customer_features`, `churn_predictions`); implemented names follow the SDD (`feature_store`). Both now specify PR-AUC as primary. The bundled PDF has not been updated alongside the Markdown snapshot amendments.
+The user-directed [SDD Markdown plan](churn_prediction_spec_driven_plan.md) guides this work. [Copilot_context](Copilot_context) now follows the implemented SDD table names and PR-AUC metric. The bundled PDF has not been updated alongside the Markdown snapshot amendments.
 
 </details>
 

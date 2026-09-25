@@ -23,52 +23,18 @@ from xgboost import XGBClassifier
 
 from src.config import (FEATURE_SET_VERSION, LABEL_VERSION, PROJECT_ROOT,
                         TABLE_FEATURES, TABLE_LABELS, TABLE_RAW)
-from src.features import FEATURE_COLUMNS
+from src.features import CATEGORICAL, FEATURE_COLUMNS, NUMERIC, validate_feature_frame
 from src.utils import get_engine
 
 SEED = 42
-NUMERIC = ["senior_citizen", "partner", "dependents", "tenure_months",
-           "phone_service", "paperless_billing", "monthly_charges", "total_charges"]
-CATEGORICAL = [column for column in FEATURE_COLUMNS if column not in NUMERIC]
-CATEGORIES = {
-    "gender": {"Female", "Male"},
-    "multiple_lines": {"Yes", "No", "No phone service"},
-    "internet_service": {"DSL", "Fiber optic", "No"},
-    "contract": {"Month-to-month", "One year", "Two year"},
-    "payment_method": {"Electronic check", "Mailed check", "Bank transfer (automatic)", "Credit card (automatic)"},
-    **{column: {"Yes", "No", "No internet service"} for column in
-       ["online_security", "online_backup", "device_protection", "tech_support", "streaming_tv", "streaming_movies"]},
-}
 
 
 def validate_training_frame(frame):
-    required = {"customer_id", "churned", *FEATURE_COLUMNS}
-    if not required.issubset(frame.columns) or frame.empty:
-        raise ValueError("Training data must be nonempty and contain all required columns")
-    ids = frame.customer_id.astype("string")
-    if ids.isna().any() or ids.str.strip().eq("").any() or ids.str.len().gt(20).any() or not ids.is_unique:
-        raise ValueError("Training customer IDs must be nonblank, unique, and at most 20 characters")
+    validate_feature_frame(frame)
+    if "churned" not in frame:
+        raise ValueError("Training data requires churned labels")
     if not frame.churned.isin([0, 1]).all() or frame.churned.value_counts().reindex([0, 1], fill_value=0).min() < 10:
         raise ValueError("Training requires binary labels and at least 10 customers in each class")
-    for column in FEATURE_COLUMNS:
-        values = frame[column]
-        if values.isna().mean() > 0.05 or (column != "total_charges" and values.isna().any()):
-            raise ValueError(f"Invalid null rate for {column}")
-        if column in CATEGORICAL:
-            if not values.isin(CATEGORIES[column]).all():
-                raise ValueError(f"Invalid categories in {column}")
-        else:
-            values = pd.to_numeric(values, errors="raise").dropna().astype(float)
-            if not np.isfinite(values).all() or values.lt(0).any():
-                raise ValueError(f"Invalid numeric values in {column}")
-            if column in ("monthly_charges", "total_charges"):
-                valid = values.le(99999999.99).all()
-            elif column == "tenure_months":
-                valid = values.le(65535).all() and values.mod(1).eq(0).all()
-            else:
-                valid = values.isin([0, 1]).all()
-            if not valid:
-                raise ValueError(f"Out-of-domain values in {column}")
 
 
 def load_training_frame():
@@ -208,9 +174,14 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-dir", type=Path, default=PROJECT_ROOT / "models" / datetime.now(timezone.utc).strftime("benchmark_%Y%m%dT%H%M%S%fZ"))
     parser.add_argument("--trials", type=int, default=8)
+    parser.add_argument("--register", action="store_true", help="Register the completed benchmark as unapproved in MySQL")
     args = parser.parse_args()
     report = train_benchmark(load_training_frame(), args.output_dir, args.trials)
-    print(json.dumps({"artifacts": str(args.output_dir), "test": report["test"], "approved": False}, indent=2))
+    result = {"artifacts": str(args.output_dir), "test": report["test"], "approved": False}
+    if args.register:
+        from src.registry import register_model
+        result["model_id"] = register_model(args.output_dir)
+    print(json.dumps(result, indent=2))
 
 
 if __name__ == "__main__":

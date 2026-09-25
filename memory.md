@@ -155,3 +155,31 @@ Append one entry after every implementation iteration. Record what changed, deci
 - No time-based evaluation, probability-calibration claim, stakeholder acceptance, registry, or scoring was fabricated. `approved=false` remains unconditional.
 - The upstream review findings R1/R2/R4/R5/R6 remain open; training guards protect this entry point but do not repair ingestion or schema behavior. R3's timeout mismatch is fixed; `.env` still needs explicit process-environment loading.
 - Next: repair the outstanding foundation findings before production use, then Phase 5 registry/scoring under the benchmark-only boundary or after obtaining temporal data and stakeholder gates.
+
+## Iteration 6 — 2026-09-25 — Phase 5 registry and benchmark scoring
+
+### Work completed
+
+- Read the full SDD and project memory; implemented the authorized Phase 5 snapshot adaptation and documented it in SDD Section 7.
+- Added explicit InnoDB `model_registry` and `model_predictions` schemas. Registry rows record typed held-out metrics, feature/label versions, training time, local artifact directory, report/dataset hashes, and provisional tier boundaries. No database JSON blobs or new dependencies were introduced.
+- Added immutable, repeatable registration of trusted local artifacts through `python -m src.registry --artifact-dir PATH` and opt-in registration after successful training with `python -m src.train --register`.
+- Added label-free benchmark scoring through `python -m src.score --benchmark --model-id ID`. Reused the training feature-domain checks in `src.features` rather than duplicating validation or requiring labels during scoring.
+- Added report/model/preprocessor hash checks before deserialization, matching recorded package versions and feature order, and transactionally replaced scores under a model row lock. DDL runs separately from score publication.
+- Updated README, reconciled legacy table names in `Copilot_context`, and added `docs/phase_5_registry_scoring.md`.
+
+### Validation and live state
+
+- Local suite: 10 tests passed. One additional opt-in MySQL integration test passed independently.
+- Verified artifact registration returned `xgb_9ee0132da5749c7e72124a8c`, with one registry row and `approved=0`. Re-registering returned the same ID without changing metadata.
+- Live scoring wrote 7,043 benchmark rows. Two runs produced identical customer IDs, probabilities, risk tiers, and feature-snapshot hash `323b82ee993494aaf9216ffe1dffe53f523ea25934c52494ff204a4f8bea8659`.
+- An injected failure after prediction inserts rolled back completely, preserving previous scores and timestamps. Default and explicit production scoring refused to run. MySQL rejected direct approval of a benchmark model via CHECK; the test transaction rolled back.
+- The initial live test assumed CHECK violations were IntegrityError; this PyMySQL version reports OperationalError. Updated the test to assert the DBAPI CHECK error (3819), then reran successfully. No application change was needed for that driver behavior.
+- Regression checks cover artifact tampering before deserialization, feature/dependency mismatches, tier boundaries/nonfinite scores, label-free invalid inputs, isolated SQL rollback/model-mode preservation, and training-before-registration ordering.
+- No raw, label, or feature refresh was run. The Phase 4 verified artifacts were reused unchanged.
+
+### Decisions and next step
+
+- All predictions are explicitly marked `benchmark`. No active-customer cohort was inferred from churn labels. Default production scoring remains unavailable until dated features, an active-customer source, and an accepted model exist.
+- Provisional high boundary is the validation-F1 threshold (0.59137362241745), medium starts at half that threshold (0.295686811208725); Phase 6 must review outreach criteria and tiers. Scores are not claimed to be calibrated future probabilities.
+- Predictions retain only the latest batch per model/mode and survive raw snapshot refreshes; they can therefore be stale until rescored. Timestamp and feature hash identify their source snapshot. Local artifacts must remain available at their registered location.
+- Existing upstream findings R1/R2/R4/R5/R6 remain open. Phase 6 business acceptance and foundation fixes are next; million-customer SLA, deployment, and monitoring are not delivered. `run_pipeline.py` remains the Phase 1–3 refresh command.

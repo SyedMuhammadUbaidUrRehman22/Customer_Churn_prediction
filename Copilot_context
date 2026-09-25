@@ -16,9 +16,9 @@ Raw CSV
   → Python ingestion
   → MySQL table: customers_raw
   → Python feature engineering
-  → MySQL table: customer_features
+  → MySQL table: feature_store
   → Python ML model (XGBoost / RandomForest)
-  → MySQL table: churn_predictions
+  → MySQL table: model_predictions
   → Power BI dashboard
 
 BOUNDARIES (VERY IMPORTANT)
@@ -34,9 +34,10 @@ FILE RESPONSIBILITIES
 config.py     → constants only (DB names, table names, paths)
 utils.py      → DB engine + helpers (NO business logic)
 ingest.py     → CSV → customers_raw
-features.py   → customers_raw → customer_features
+features.py   → customers_raw → feature_store
 train.py      → train & evaluate model, save to disk
-score.py      → score customers, write churn_predictions
+registry.py   → verify artifacts, register unapproved benchmark models
+score.py      → explicit benchmark scoring, write model_predictions
 run_pipeline.py → orchestrate steps in order
 
 QUALITY RULES
@@ -64,7 +65,7 @@ DATABASE RULES
 
 POWER BI RULES
 --------------
-- Connect ONLY to churn_predictions table
+- Connect ONLY to model_predictions table; distinguish benchmark scores from production
 - KPIs must be business-oriented
 - Avoid excessive calculated columns
 

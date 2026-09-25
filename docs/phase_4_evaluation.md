@@ -39,4 +39,4 @@ API references: [XGBoost 3.1 API](https://xgboost.readthedocs.io/en/release_3.1.
 
 ## Remaining boundaries
 
-No stakeholder metric gates or temporal holdout are available: `approved=false` is unconditional. Phase 5 registry/scoring remain unimplemented. In the historical Phase 0–3 review, R3's timeout mismatch is fixed; R1/R2/R4/R5/R6 remain open upstream. Independent training validation does not repair refresh atomicity or schema constraints. Resolve these before productionizing the pipeline.
+No stakeholder metric gates or temporal holdout are available: `approved=false` is unconditional. Registry and benchmark scoring were subsequently implemented in [Phase 5](phase_5_registry_scoring.md); production scoring remains unavailable. In the historical Phase 0–3 review, R3's timeout mismatch is fixed; R1/R2/R4/R5/R6 remain open upstream. Independent training validation does not repair refresh atomicity or schema constraints. Resolve these before productionizing the pipeline.

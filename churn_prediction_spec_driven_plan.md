@@ -227,6 +227,16 @@ Define concrete numeric gates before training starts (fill in with stakeholders)
 
 ## 7. System Architecture
 
+### Phase 5 snapshot implementation (2026-09-25)
+
+The current benchmark is registered with `evaluation_scope='benchmark'` and `approved=0`. Registration is immutable and repeatable, stores held-out metrics as typed columns, and pins the local evaluation report by SHA-256; that report records hyperparameters, importances, dependency versions, and model/preprocessor hashes. Artifacts must originate from trusted local training. Model and preprocessing bytes are checked before loading, with matching recorded dependency versions and feature order.
+
+Default scoring requires an approved production model and currently fails closed because dated features and an active-customer source do not exist. Explicit `--benchmark --model-id ID` scoring covers every row of the versioned snapshot without consulting labels or claiming those customers are active. Predictions carry `scoring_mode='benchmark'`, model/feature versions, UTC score time, and a feature-snapshot hash. They are demonstration scores, including in-sample customers, not new evaluation evidence or calibrated future churn probabilities.
+
+For this benchmark only, high risk is probability >= the validation-F1 threshold; medium is >= half that threshold; low is below half. Both boundaries are recorded in the registry. This provisional display policy needs business review in Phase 6. Benchmark models cannot be approved under the database CHECK constraint.
+
+Prediction refreshes serialize on the model registry row and atomically replace only that model's benchmark rows. Other models/modes survive. Schema creation runs separately because MySQL DDL commits implicitly. Predictions reference the registry, not the replaceable raw snapshot; they therefore survive raw refreshes and may be stale until rescored, identifiable by timestamp/hash. Reruns retain the latest batch per model/mode, not a complete scoring history. This is the Phase 5 benchmark adaptation; FR6 production active-customer scoring remains blocked on real sources and business acceptance.
+
 ```
 MySQL (raw tables)
    → ETL / feature computation job (SQL or Python)
