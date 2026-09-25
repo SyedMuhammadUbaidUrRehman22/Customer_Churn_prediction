@@ -131,3 +131,27 @@ Append one entry after every implementation iteration. Record what changed, deci
 
 - Verified 43 local links and fragments, balanced code fences, and all 14 expandable README panels.
 - Git whitespace checks passed; `.env` remains ignored. GitHub visual rendering was not previewed during this review.
+
+## Iteration 5 — 2026-09-25 — Phase 4 XGBoost snapshot benchmark
+
+### Work completed
+
+- Read project memory and the full SDD; implemented the requested XGBoost phase as the previously anticipated non-temporal benchmark.
+- Added the explicit snapshot evaluation amendment to SDD Section 5.2: deterministic stratified 60/20/20 splits, eight randomized candidates, validation early stopping and threshold selection, untouched final test.
+- Implemented MySQL-only version-filtered loading with consistent-read coverage checks and independent feature-domain validation, train-only median imputation/one-hot encoding, class weighting, metrics, original-feature importances, and local model/preprocessor/report/split artifacts.
+- Fixed the shared PyMySQL timeout keyword and pinned already-installed XGBoost 3.1.3, scikit-learn 1.8.0, and joblib 1.5.3. No new framework was introduced; existing sklearn utilities handle preprocessing and search.
+- Updated README, the legacy primary-metric instruction, and `docs/phase_4_evaluation.md`. Generated model directories remain local and ignored.
+
+### Validation
+
+- Five regression tests passed, including deterministic customer-disjoint splits, invalid training domains, training-only imputer fit, artifact reload metric equivalence, and both driver timeout variants.
+- Live MySQL training read 7,043 customers without refreshing or mutating tables. Split sizes: 4,225 / 1,409 / 1,409.
+- Eight-candidate verified run saved to `models/phase4_benchmark_verified/`: test average precision 0.658753 (baseline 0.265436), ROC-AUC 0.845402, precision 0.589912, recall 0.719251, F1 0.648193, top-decile recall 0.294118, top-decile precision 0.780142, Brier 0.164171.
+- Initial tests exposed object-typed CSV labels and NaN in XGBoost's parameter metadata; fixed integer normalization and JSON null serialization before the successful rerun. `models/phase4_benchmark/` is an incomplete initial artifact directory, not the verified run.
+
+### Decisions and next step
+
+- The user authorized proceeding to XGBoost. Training is standalone (`python -m src.train`); `run_pipeline.py` continues to refresh only Phases 1–3.
+- No time-based evaluation, probability-calibration claim, stakeholder acceptance, registry, or scoring was fabricated. `approved=false` remains unconditional.
+- The upstream review findings R1/R2/R4/R5/R6 remain open; training guards protect this entry point but do not repair ingestion or schema behavior. R3's timeout mismatch is fixed; `.env` still needs explicit process-environment loading.
+- Next: repair the outstanding foundation findings before production use, then Phase 5 registry/scoring under the benchmark-only boundary or after obtaining temporal data and stakeholder gates.

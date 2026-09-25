@@ -2,9 +2,9 @@
 
 ### From a Telco customer snapshot to validated MySQL labels and features
 
-A Python + MySQL foundation for churn analysis, developed against a [spec-driven plan](churn_prediction_spec_driven_plan.md). The current implementation covers snapshot ingestion, labels, and a 19-field feature store. Model training and scoring are future phases.
+A Python + MySQL churn project developed against a [spec-driven plan](churn_prediction_spec_driven_plan.md). It now includes ingestion, labels, 19 predictors, and an evaluated XGBoost snapshot benchmark. Registry and scoring remain future phases.
 
-**Current scope:** through Phase 3 · **Dataset:** Telco customer snapshot · **Version:** `telco_snapshot_v1`
+**Current scope:** through Phase 4 (benchmark only) · **Dataset:** Telco customer snapshot · **Version:** `telco_snapshot_v1`
 
 [Quick start](#quick-start) · [Pipeline](#explore-the-pipeline) · [Data dictionary](#data-dictionary) · [Verification](#verify-results) · [Review](#review-findings) · [Roadmap](#roadmap)
 
@@ -85,7 +85,7 @@ The application reads `DATABASE_URI` from the process environment at import time
 
 URL-encode reserved characters in the username or password when constructing a connection URI. Keep real credentials out of issues, screenshots, and committed files. `.env` is excluded by [.gitignore](.gitignore), but the file alone does not configure the Python process.
 
-The review found a local `.env` URI using `mysql+pymysql`. Although PyMySQL is installed locally, it is not in the pinned requirements, and the current helper passes it an incompatible timeout keyword. Use the documented `mysql+mysqlconnector` URI for this implementation.
+The helper now supports the PyMySQL timeout keyword too. PyMySQL is installed locally but is not pinned; new installations should use the documented `mysql+mysqlconnector` driver.
 
 </details>
 
@@ -121,8 +121,8 @@ flowchart LR
     INGEST --> RAW[(customers_raw)]
     RAW --> LABELS[(churn_labels)]
     RAW --> FEATURES[(feature_store)]
-    LABELS -. Planned Phase 4 .-> TRAIN[XGBoost training and evaluation]
-    FEATURES -. Planned Phase 4 .-> TRAIN
+    LABELS --> TRAIN[XGBoost snapshot benchmark]
+    FEATURES --> TRAIN
 ```
 
 The orchestrator runs **ingestion → labeling → features**. Both derived tables read the raw table. Each materializer uses its own transaction.
@@ -189,7 +189,7 @@ Customer ID is stored for joins but excluded from `FEATURE_COLUMNS`. The target 
 | `monthly_charges` | `MonthlyCharges` | Monthly charge, `DECIMAL(10,2)` in MySQL |
 | `total_charges` | `TotalCharges` | Total charge, nullable `DECIMAL(10,2)` |
 
-The 11 missing total-charge values are preserved. No imputation or categorical encoding has been implemented yet. Snapshot attributes are not proven to precede the churn outcome.
+The 11 missing total-charge values are preserved in MySQL. Training uses train-only median imputation and one-hot encoding. Snapshot attributes are not proven to precede the churn outcome.
 
 </details>
 
@@ -202,7 +202,7 @@ The 11 missing total-charge values are preserved. No imputation or categorical e
 .\venv\Scripts\python.exe -m src.ingest --validate-only
 ```
 
-Current result: **3 tests passed** and **7,043 CSV rows validated**. Tests cover the real dataset, duplicate IDs, label-count/class checks, feature-count/null-rate checks, and explicit target exclusion. They do not exercise database rollback or all invalid-input cases.
+Current result: **5 tests passed**. Coverage includes the real dataset, duplicate IDs, label/feature gates, training validation, deterministic disjoint splits, train-only imputation, artifact reload equivalence, and driver timeout selection. Database rollback and all invalid-input cases are not covered.
 
 ### Database checks
 
@@ -262,7 +262,7 @@ The [Phase 0–3 review](docs/phase_0_3_review.md) includes evidence, source loc
 | --- | --- | --- |
 | High | A refresh commits raw data before rebuilding cascaded labels/features | Open |
 | High | Fractional tenure is truncated; infinity and out-of-range values pass validation | Open |
-| High | Local PyMySQL configuration fails in the application connection helper | Open; supported setup documented above |
+| High | Local PyMySQL configuration fails in the application connection helper | Fixed and tested in Phase 4; `.env` loading remains explicit |
 | Medium | Invalid categories, blanks, and overlong IDs can pass CSV validation | Open |
 | Medium | Empty feature input is accepted as a successful materialization | Open |
 | Medium | The label date constraint permits a partially null date pair | Open |
@@ -281,7 +281,7 @@ Set `$env:DATABASE_URI` in the same terminal before starting Python. A `.env` fi
 <details>
 <summary><code>unexpected keyword argument 'connection_timeout'</code></summary>
 
-Use the `mysql+mysqlconnector://` scheme shown in [Quick start](#quick-start). The helper currently uses MySQL Connector's timeout keyword, which PyMySQL does not accept. Installing PyMySQL alone does not resolve this error.
+The current helper chooses the timeout keyword by driver. Update to current code or use the pinned `mysql+mysqlconnector://` scheme in [Quick start](#quick-start).
 
 </details>
 
@@ -303,17 +303,36 @@ Inspect row counts in all three tables before using their contents. Raw ingestio
 
 | Phase | Current state | Remaining boundary |
 | --- | --- | --- |
-| 0 · Setup | Local Python + MySQL environment verified | Configuration consistency; modeling dependencies deferred |
+| 0 · Setup | Environment verified; modeling dependencies pinned | `.env` loading remains explicit |
 | 1 · Data foundation | Included CSV ingested and checked | Review findings; broader event sources unavailable |
 | 2 · Labeling | Supplied snapshot outcome materialized | Dated churn events and agreed future-window definition |
 | 3 · Features | 19 snapshot predictors materialized | Review findings; temporal features and leakage validation |
-| 4 · Modeling | Not started | Agreed evaluation design and numeric acceptance gates |
+| 4 · Modeling | XGBoost snapshot benchmark trained and evaluated | Temporal data and stakeholder acceptance gates |
 | 5 · Registry and scoring | Not started | Trained and evaluated model |
 | 6 · Business validation | Not started | Outreach capacity, costs, and stakeholder sign-off |
 | 7 · Deployment | Not started | Scheduling, alerting, and rollback validation |
 | 8 · Monitoring | Not started | Realized outcomes, drift metrics, retraining policy |
 
-Work is paused at Phase 3. Snapshot implementation does not constitute completion of the SDD's production temporal requirements. A non-temporal benchmark would need an explicit evaluation-plan adjustment before Phase 4.
+Phase 4 follows the snapshot amendment in SDD Section 5.2. Production temporal requirements remain unmet. See the [evaluation report](docs/phase_4_evaluation.md).
+
+### Run the XGBoost benchmark
+
+With `DATABASE_URI` configured and Phase 1–3 tables populated:
+
+```powershell
+.\venv\Scripts\python.exe -m src.train
+```
+
+This reads MySQL without refreshing the tables. Optional `--trials 8` and `--output-dir models/my_run` control candidate count and a new output directory; existing directories are rejected.
+
+<details>
+<summary><strong>Phase 4 results and artifacts</strong></summary>
+
+Test average precision **0.6588** (prevalence baseline **0.2654**), ROC-AUC **0.8454**, precision **0.5899**, recall **0.7193**, Brier **0.1642**. These describe a non-temporal benchmark, not a future churn forecast.
+
+Runs save `model.json`, `preprocessor.joblib`, `report.json`, and `splits.csv`. Run directories are ignored by Git; the evaluation report is versioned. Only load trusted joblib artifacts. The threshold maximizes validation F1 and is not a business outreach rule. No model is approved or registered.
+
+</details>
 
 <details>
 <summary><strong>Repository map and specification precedence</strong></summary>
@@ -331,9 +350,9 @@ churn-analytics/
 │   ├── ingest.py                  CSV validation and replacement load
 │   ├── labels.py                  Label materialization
 │   ├── features.py                Feature materialization
-│   ├── train.py                   Empty placeholder
+│   ├── train.py                   XGBoost benchmark and evaluation
 │   └── score.py                   Empty placeholder
-├── tests/                         Three focused unit tests
+├── tests/                         Five regression tests
 ├── docs/phase_0_3_review.md         Review and evidence
 ├── run_pipeline.py                Phase 1–3 orchestration
 ├── requirements.txt               Pinned runtime dependencies
@@ -341,7 +360,7 @@ churn-analytics/
 └── memory.md                      Implementation history
 ```
 
-The user-directed [SDD Markdown plan](churn_prediction_spec_driven_plan.md) guides this work. [Copilot_context](Copilot_context) contains older table names (`customer_features`, `churn_predictions`) and ROC-AUC as its primary metric; these differ from the SDD and should be reconciled before future modeling work. The implemented table is `feature_store`, and the SDD calls for PR-AUC as primary. The bundled PDF was not updated alongside the Markdown snapshot amendments.
+The user-directed [SDD Markdown plan](churn_prediction_spec_driven_plan.md) guides this work. [Copilot_context](Copilot_context) retains older table names (`customer_features`, `churn_predictions`); implemented names follow the SDD (`feature_store`). Both now specify PR-AUC as primary. The bundled PDF has not been updated alongside the Markdown snapshot amendments.
 
 </details>
 

@@ -173,6 +173,13 @@ The available Telco snapshot contains a supplied binary `Churn` outcome but no e
 Handles tabular, mixed-type data well; native handling of missing values; built-in class-imbalance controls (`scale_pos_weight`); fast to iterate on; strong track record on churn-style problems.
 
 ### 5.2 Training Pipeline
+
+#### Snapshot benchmark amendment (2026-09-25)
+
+For `telco_snapshot_v1`, Phase 4 uses customer-sorted, stratified 60/20/20 train/validation/test splits with seed 42 because dates are unavailable. This benchmark deliberately replaces temporal splitting and cross-validation with a single validation holdout. Fit median imputation and one-hot encoding on training rows only. Search eight seeded random parameter candidates; use validation early stopping, validation average precision for selection, and validation F1 for an exploratory threshold. Evaluate the final test only after selection. Report PR-AUC as average precision alongside Section 6 metrics and prevalence baselines.
+
+Persist local model, preprocessing, split membership, and evaluation artifacts; registry and scoring remain Phase 5. Always record `approved=false` until temporal evaluation and stakeholder gates are available. The 50% original-feature importance gate is diagnostic, not proof of leakage safety. Existing ingestion/refresh findings remain open; the standalone trainer reads existing tables and independently validates coverage and feature domains. The following production requirements remain unchanged.
+
 1. Pull `feature_store` JOIN `churn_labels` for a given `feature_set_version` from MySQL into a training dataframe.
 2. Time-based train/validation/test split (not random) — train on older observation dates, validate/test on more recent ones, to simulate real deployment.
 3. Encode categoricals (target/one-hot or native XGBoost categorical support).

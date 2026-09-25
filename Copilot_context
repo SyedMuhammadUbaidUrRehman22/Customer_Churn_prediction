@@ -50,7 +50,7 @@ QUALITY RULES
 ML REQUIREMENTS
 ---------------
 - Use train/validation split
-- Use ROC-AUC as primary metric
+- Use PR-AUC (average precision) as primary metric; also report ROC-AUC
 - Report precision/recall
 - Handle class imbalance explicitly
 - Save model artifact
