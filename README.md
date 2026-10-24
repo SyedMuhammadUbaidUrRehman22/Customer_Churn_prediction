@@ -1,24 +1,51 @@
 # Customer Churn Analytics
 
-### From a Telco customer snapshot to validated MySQL labels and features
+<picture>
+  <source media="(prefers-reduced-motion: reduce)" srcset="docs/assets/churn-pipeline.png">
+  <img src="docs/assets/churn-pipeline.gif" alt="Animated workflow: Telco CSV to validated MySQL data, labels and 19 features, an XGBoost snapshot benchmark, and stored risk scores." width="1120">
+</picture>
 
-A Python + MySQL churn project developed against a [spec-driven plan](churn_prediction_spec_driven_plan.md). It includes ingestion, labels, 19 predictors, an evaluated XGBoost snapshot benchmark, and MySQL model registration and benchmark scoring.
+**Turn a Telco customer snapshot into validated data, an evaluated churn benchmark, and traceable risk scores.**
 
-**Current scope:** Phase 8 cohort retention and monitoring infrastructure (production activation and business acceptance pending) · **Dataset:** Telco customer snapshot · **Version:** `telco_snapshot_v1`
+Built with **Python 3.13 · pandas · MySQL 8 · SQLAlchemy · scikit-learn · XGBoost**. Developed against a [spec-driven plan](churn_prediction_spec_driven_plan.md), with versioned labels and features, artifact verification, business-review scenarios, and gated deployment and monitoring infrastructure.
 
-[Quick start](#quick-start) · [Pipeline](#explore-the-pipeline) · [Data dictionary](#data-dictionary) · [Verification](#verify-results) · [Review](#review-findings) · [Roadmap](#roadmap)
+[Quick start](#quick-start) · [Architecture](#explore-the-pipeline) · [Benchmark and scoring](#benchmark-and-scoring) · [Deployment and monitoring](#deployment-and-monitoring) · [Verification](#verify-results) · [Roadmap](#roadmap)
 
-> **Snapshot benchmark:** The CSV contains a supplied `Churn` outcome, but no observation or cancellation dates. These tables cannot establish a future prediction horizon, temporal leakage safety, or a time-based holdout.
+> [!IMPORTANT]
+> **Evaluated snapshot benchmark; production activation is pending.** The CSV supplies a `Churn` outcome but no observation or cancellation dates. It cannot establish a future prediction horizon, temporal leakage safety, or a time-based holdout. Production requires genuine dated sources, an approved temporal model, and business acceptance.
+
+<sub>Prefer a still image? <a href="docs/assets/churn-pipeline.png">View the static workflow.</a></sub>
+
+## What you can do
+
+| Capability | What is implemented |
+| --- | --- |
+| Validate and load | CSV checks, normalization, and transactional MySQL snapshot loading |
+| Build the learning dataset | Versioned supplied outcomes and 19 explicitly selected predictors |
+| Train and evaluate | Reproducible stratified splits, train-only preprocessing, and XGBoost tuning |
+| Register and score | Artifact integrity checks, model provenance, and atomic benchmark score replacement |
+| Review business scenarios | Deterministic customer ranking, outreach scenarios, and pending approval records |
+| Prepare production operations | Gated deployment, rollback, immutable cohort history, drift reports, and an HTML dashboard; activation remains pending |
 
 ## At a glance
 
-Last read-only database verification: **2026-09-24**, MySQL **8.0.46**.
+Recorded dataset verification: **2026-09-24**, MySQL **8.0.46**, version **`telco_snapshot_v1`**.
 
 | Customers | Churned | Retained | Predictors | Missing total charges |
 | ---: | ---: | ---: | ---: | ---: |
 | 7,043 | 1,869 | 5,174 | 19 | 11 |
 
 All 7,043 customers join across raw data, labels, and features. The audit found **zero label mismatches** and **zero mismatches across the 19 copied feature values**. These are dataset checks, not model performance metrics.
+
+### Held-out benchmark results
+
+The [verified Phase 4 evaluation](docs/phase_4_evaluation.md) uses seeded, stratified **60/20/20** train/validation/test splits. The test split contains **1,409 customers**; the threshold is selected on validation data.
+
+| Average precision | Prevalence baseline AP | ROC-AUC | Precision | Recall | Brier score |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| **0.6588** | 0.2654 | **0.8454** | 0.5899 | 0.7193 | 0.1642 |
+
+These are non-temporal holdout results. Full-snapshot risk scores include training customers and are not a second holdout evaluation.
 
 <details>
 <summary><strong>Choose your path through the repository</strong></summary>
@@ -42,6 +69,13 @@ All 7,043 customers join across raw data, labels, and features. The audit found 
 These commands use **Windows PowerShell**. The reviewed environment runs **Python 3.13.3**, pandas **3.0.0**, SQLAlchemy **2.0.46**, and mysql-connector-python **9.5.0**.
 
 ### 1. Set up Python
+
+Clone the repository, or open your existing checkout:
+
+```powershell
+git clone https://github.com/SyedMuhammadUbaidUrRehman22/Customer_Churn_prediction.git
+Set-Location Customer_Churn_prediction
+```
 
 From the repository root, create the environment if it does not already exist:
 
@@ -87,7 +121,7 @@ The application reads `DATABASE_URI` from the process environment at import time
 
 URL-encode reserved characters in the username or password when constructing a connection URI. Keep real credentials out of issues, screenshots, and committed files. `.env` is excluded by [.gitignore](.gitignore), but the file alone does not configure the Python process.
 
-The helper now supports the PyMySQL timeout keyword too. PyMySQL is installed locally but is not pinned; new installations should use the documented `mysql+mysqlconnector` driver.
+The connection helper also supports PyMySQL's timeout keyword. PyMySQL is not pinned; new installations should use the documented `mysql+mysqlconnector` driver.
 
 </details>
 
@@ -162,9 +196,102 @@ Customer ID is stored for joins but excluded from `FEATURE_COLUMNS`. The target 
 
 </details>
 
+## Benchmark and scoring
+
+### Run the XGBoost benchmark
+
+With `DATABASE_URI` configured and Phase 1–3 tables populated:
+
+```powershell
+.\venv\Scripts\python.exe -m src.train
+```
+
+This reads MySQL without refreshing the input tables. Optional `--trials 8` and `--output-dir models/my_run` control candidate count and a new output directory; existing directories are rejected. Add `--register` to register the completed evaluation as an unapproved benchmark.
+
+<details>
+<summary><strong>Phase 4 results and artifacts</strong></summary>
+
+Runs save `model.json`, `preprocessor.joblib`, `report.json`, and `splits.csv`. Run directories are ignored by Git; the evaluation report is versioned. Only load trusted joblib artifacts. The threshold maximizes validation F1 and is not a business outreach rule. Registration is optional and never approves the benchmark.
+
+</details>
+
+### Register and score the benchmark
+
+With `DATABASE_URI` configured, register an existing trusted training output:
+
+```powershell
+.\venv\Scripts\python.exe -m src.registry --artifact-dir models/phase4_benchmark_verified
+```
+
+Use the returned model ID. The verified Phase 4 model's ID is `xgb_9ee0132da5749c7e72124a8c`:
+
+```powershell
+.\venv\Scripts\python.exe -m src.score --benchmark --model-id xgb_9ee0132da5749c7e72124a8c
+```
+
+This stores 7,043 labeled benchmark scores in MySQL. `python -m src.score` without benchmark mode refuses production scoring. The source has no verified active-customer population, and the model remains `approved=0`. See [Phase 5 validation](docs/phase_5_registry_scoring.md).
+
+<details>
+<summary><strong>Inspect the registry and benchmark scores</strong></summary>
+
+```sql
+SELECT model_id, trained_at, evaluation_scope, approved, pr_auc,
+       low_threshold, high_threshold, artifact_path
+FROM model_registry ORDER BY trained_at DESC;
+
+SELECT scoring_mode, risk_tier, COUNT(*) AS customers
+FROM model_predictions
+WHERE model_id = 'xgb_9ee0132da5749c7e72124a8c'
+GROUP BY scoring_mode, risk_tier;
+
+SELECT customer_id, churn_probability, risk_tier, scored_at
+FROM model_predictions
+WHERE model_id = 'xgb_9ee0132da5749c7e72124a8c' AND scoring_mode = 'benchmark'
+ORDER BY churn_probability DESC, customer_id LIMIT 20;
+```
+
+Provisional risk policy: low below 0.295687, medium from there to below 0.591374, high at or above 0.591374 (displayed boundaries rounded). These tiers are not approved outreach decisions. Full-snapshot scores include training customers and must not be used as new holdout evaluation.
+
+Reruns replace only that model's benchmark scores atomically. A failure preserves its previous scores. Source-table refreshes do not delete predictions: use score time and `feature_snapshot_sha256` to identify the saved batch, and rerun scoring after a refresh. Benchmark scoring keeps the latest scores per model; immutable cohort history belongs to the separate production deployment workflow.
+
+</details>
+
+### Review business-validation scenarios
+
+```powershell
+.\venv\Scripts\python.exe -m src.business_validation --model-id xgb_9ee0132da5749c7e72124a8c --save
+```
+
+This writes a Markdown report, exact JSON, and ranked customer CSV under `models/phase6_business_validation/`, and saves four pending outreach scenarios in `business_validation`. Omit `--save` for database reads only; use repeatable `--top-k N` for additional scenarios and `--report-path PATH.md` for another output location.
+
+The report distinguishes saved held-out metrics from full-snapshot outreach/tier statistics, which include training customers. Candidate business criteria live in `BUSINESS_ACCEPTANCE` in `src/config.py`; unresolved values are `None`. Configured criteria never approve the benchmark. See the [Phase 6 workflow and validation evidence](docs/phase_6_business_validation.md) for formulas, persistence, stakeholder decisions, and production blockers.
+
+## Deployment and monitoring
+
+### Production deployment infrastructure
+
+After configuring the production prerequisites in [.env.example](.env.example), the production entry point is:
+
+```powershell
+$env:APP_ENV = 'production'
+.\venv\Scripts\python.exe -m src.deploy --as-of YYYY-MM-DD
+```
+
+Replace the date with a genuine external ETL observation date. The current Telco snapshot cannot pass production preflight. The runner requires an approved temporal model, documented business acceptance, real source tables, an active-customer cohort, and compatible dated features. It never promotes the benchmark. Separate `--init-schema` setup, model selection, atomic publication, rollback, alerts, disabled-by-default cron scheduling, and remaining integration gates are documented in the [Phase 7 deployment guide](docs/phase_7_deployment.md). `run_pipeline.py` remains the development snapshot refresh command.
+
+### Monitor retained production cohorts
+
+After operational schema setup and genuine dated production scoring:
+
+```powershell
+.\venv\Scripts\python.exe -m src.monitor --as-of YYYY-MM-DD --output-dir models/phase8_monitoring
+```
+
+Phase 8 archives each validated cohort's features and scores inside the publication transaction. The monitor compares an earlier compatible cohort, waits for complete mature future-window outcomes, and writes JSON, Markdown, and a standalone HTML dashboard. Its policy defaults remain unresolved; configured breaches recommend review/retraining without invoking a trainer or granting model approval. The current undated benchmark cannot supply production monitoring evidence. See the [monitoring guide](docs/phase_8_monitoring.md) for outcome contracts, formulas, policy, test commands, and v2 feature planning.
+
 ## Data dictionary
 
-| Table | Primary key | Purpose | Current rows |
+| Table | Primary key | Purpose | Recorded snapshot rows |
 | --- | --- | --- | ---: |
 | `customers_raw` | `customer_id` | Validated snapshot plus supplied outcome | 7,043 |
 | `churn_labels` | `customer_id`, `label_version` | Versioned snapshot outcome and provenance | 7,043 |
@@ -172,6 +299,8 @@ Customer ID is stored for joins but excluded from `FEATURE_COLUMNS`. The target 
 | `model_registry` | `model_id` | Unapproved benchmark, metrics, artifact identity | 1 |
 | `model_predictions` | `customer_id`, `model_id`, `scoring_mode` | Latest benchmark scores per model | 7,043 |
 | `business_validation` | `validation_id`; unique analysis hash + N | Pending business-review scenarios | 4 |
+
+These are recorded development counts, not a live database status check. Production run, state, cohort-history, and outcome tables are documented in the [deployment](docs/phase_7_deployment.md) and [monitoring](docs/phase_8_monitoring.md) guides.
 
 <details>
 <summary><strong>Expand all 19 predictor definitions</strong></summary>
@@ -332,137 +461,24 @@ Inspect row counts in all three tables before using their contents. Raw ingestio
 
 Phase 4 follows the snapshot amendment in SDD Section 5.2. Production temporal requirements remain unmet. See the [evaluation report](docs/phase_4_evaluation.md).
 
-### Run the XGBoost benchmark
-
-With `DATABASE_URI` configured and Phase 1–3 tables populated:
-
-```powershell
-.\venv\Scripts\python.exe -m src.train
-```
-
-This reads MySQL without refreshing the input tables. Optional `--trials 8` and `--output-dir models/my_run` control candidate count and a new output directory; existing directories are rejected. Add `--register` to register the completed evaluation as an unapproved benchmark.
-
-<details>
-<summary><strong>Phase 4 results and artifacts</strong></summary>
-
-Test average precision **0.6588** (prevalence baseline **0.2654**), ROC-AUC **0.8454**, precision **0.5899**, recall **0.7193**, Brier **0.1642**. These describe a non-temporal benchmark, not a future churn forecast.
-
-Runs save `model.json`, `preprocessor.joblib`, `report.json`, and `splits.csv`. Run directories are ignored by Git; the evaluation report is versioned. Only load trusted joblib artifacts. The threshold maximizes validation F1 and is not a business outreach rule. Registration is optional and never approves the benchmark.
-
-</details>
-
-### Review business-validation scenarios
-
-```powershell
-.\venv\Scripts\python.exe -m src.business_validation --model-id xgb_9ee0132da5749c7e72124a8c --save
-```
-
-This writes a Markdown report, exact JSON, and ranked customer CSV under `models/phase6_business_validation/`, and saves four pending outreach scenarios in `business_validation`. Omit `--save` for database reads only; use repeatable `--top-k N` for additional scenarios and `--report-path PATH.md` for another output location.
-
-The report distinguishes saved held-out metrics from full-snapshot outreach/tier statistics, which include training customers. Candidate business criteria live in `BUSINESS_ACCEPTANCE` in `src/config.py`; unresolved values are `None`. Configured criteria never approve the benchmark. See the [Phase 6 workflow and validation evidence](docs/phase_6_business_validation.md) for formulas, persistence, stakeholder decisions, and production blockers.
-
-### Production deployment infrastructure
-
-After configuring the production prerequisites in [.env.example](.env.example), the production entry point is:
-
-```powershell
-$env:APP_ENV = 'production'
-.\venv\Scripts\python.exe -m src.deploy --as-of YYYY-MM-DD
-```
-
-Replace the date with a genuine external ETL observation date. The current Telco snapshot cannot pass production preflight. The runner requires an approved temporal model, documented business acceptance, real source tables, an active-customer cohort, and compatible dated features. It never promotes the benchmark. Separate `--init-schema` setup, model selection, atomic publication, rollback, alerts, disabled-by-default cron scheduling, and remaining integration gates are documented in the [Phase 7 deployment guide](docs/phase_7_deployment.md). `run_pipeline.py` remains the development snapshot refresh command.
-
-### Monitor retained production cohorts
-
-After operational schema setup and genuine dated production scoring:
-
-```powershell
-.\venv\Scripts\python.exe -m src.monitor --as-of YYYY-MM-DD --output-dir models/phase8_monitoring
-```
-
-Phase 8 archives each validated cohort's features and scores inside the publication transaction. The monitor compares an earlier compatible cohort, waits for complete mature future-window outcomes, and writes JSON, Markdown, and a standalone HTML dashboard. Its policy defaults remain unresolved; configured breaches recommend review/retraining without invoking a trainer or granting model approval. The current undated benchmark cannot supply production monitoring evidence. See the [monitoring guide](docs/phase_8_monitoring.md) for outcome contracts, formulas, policy, test commands, and v2 feature planning.
-
-### Register and score the benchmark
-
-With `DATABASE_URI` configured, register an existing trusted training output:
-
-```powershell
-.\venv\Scripts\python.exe -m src.registry --artifact-dir models/phase4_benchmark_verified
-```
-
-Use the returned model ID. The verified Phase 4 model's ID is `xgb_9ee0132da5749c7e72124a8c`:
-
-```powershell
-.\venv\Scripts\python.exe -m src.score --benchmark --model-id xgb_9ee0132da5749c7e72124a8c
-```
-
-This stores 7,043 labeled benchmark scores in MySQL. `python -m src.score` without benchmark mode refuses production scoring. The source has no verified active-customer population, and the model remains `approved=0`. See [Phase 5 validation](docs/phase_5_registry_scoring.md).
-
-<details>
-<summary><strong>Inspect the registry and benchmark scores</strong></summary>
-
-```sql
-SELECT model_id, trained_at, evaluation_scope, approved, pr_auc,
-       low_threshold, high_threshold, artifact_path
-FROM model_registry ORDER BY trained_at DESC;
-
-SELECT scoring_mode, risk_tier, COUNT(*) AS customers
-FROM model_predictions
-WHERE model_id = 'xgb_9ee0132da5749c7e72124a8c'
-GROUP BY scoring_mode, risk_tier;
-
-SELECT customer_id, churn_probability, risk_tier, scored_at
-FROM model_predictions
-WHERE model_id = 'xgb_9ee0132da5749c7e72124a8c' AND scoring_mode = 'benchmark'
-ORDER BY churn_probability DESC, customer_id LIMIT 20;
-```
-
-Provisional risk policy: low below 0.295687, medium from there to below 0.591374, high at or above 0.591374 (displayed boundaries rounded). These tiers are not approved outreach decisions. Full-snapshot scores include training customers and must not be used as new holdout evaluation.
-
-Reruns replace only that model's benchmark scores atomically. A failure preserves its previous scores. Source-table refreshes do not delete predictions: use score time and `feature_snapshot_sha256` to identify the saved batch, and rerun scoring after a refresh. The application does not retain every historical scoring run.
-
-</details>
-
 <details>
 <summary><strong>Repository map and specification precedence</strong></summary>
 
 ```text
-churn-analytics/
-├── data/raw/                       Included Telco CSV
-├── sql/
-│   ├── 01_create_tables.sql        Raw table
-│   ├── 02_create_labels.sql        Snapshot labels
-│   ├── 03_create_feature_store.sql Snapshot predictors
-│   ├── 04_create_model_registry.sql Model audit records
-│   ├── 05_create_model_predictions.sql Benchmark/production predictions
-│   ├── 06_create_business_validation.sql Pending review scenarios
-│   ├── 07_create_deployment_runs.sql Deployment attempt history
-│   ├── 08_create_production_state.sql Active production model/run
-│   ├── 09_create_scoring_batches.sql Retained cohort metadata
-│   ├── 10_create_scoring_history.sql Historical features and predictions
-│   └── 11_create_monitoring_outcomes.sql External future-window outcomes
-├── src/
-│   ├── config.py                  Paths, versions, environment lookup
-│   ├── utils.py                   SQLAlchemy engine helper
-│   ├── ingest.py                  CSV validation and replacement load
-│   ├── labels.py                  Label materialization
-│   ├── features.py                Feature materialization
-│   ├── train.py                   XGBoost benchmark and evaluation
-│   ├── registry.py                Artifact verification and registration
-│   ├── score.py                   Shared prediction writer and benchmark scoring
-│   ├── business_validation.py     Benchmark business-review analysis
-│   ├── deploy.py                  Gated production orchestration and rollback
-│   ├── monitoring_history.py      Atomic immutable cohort archive
-│   └── monitor.py                 Drift, realized metrics, recommendations, reports
-├── ops/deploy-cron.sh              Disabled-until-configured scheduler entry point
-├── tests/                         Local regressions and opt-in MySQL integration
-├── docs/phase_0_3_review.md         Review and evidence
-├── docs/phase_7_deployment.md       Production contract and operations guide
-├── docs/phase_8_monitoring.md       Cohort/outcome contract and monitoring guide
-├── run_pipeline.py                Phase 1–3 orchestration
-├── requirements.txt               Pinned runtime dependencies
+Customer_Churn_prediction/
+├── data/raw/           Included Telco customer snapshot
+├── src/                Ingestion, features, training, scoring, deployment, monitoring
+├── sql/                Versioned schema definitions
+├── docs/               Reviews, evaluation evidence, and operations guides
+│   └── assets/         Animated workflow and static fallback
+├── tests/              Unit regressions and opt-in MySQL integration
+├── ops/                Disabled-until-configured cron entry point
+├── notebooks/          Exploratory work
+├── models/             Generated artifacts and reports (run directories ignored)
+├── run_pipeline.py     Development snapshot refresh: ingest → labels → features
+├── requirements.txt    Pinned runtime dependencies
 ├── churn_prediction_spec_driven_plan.md
-└── memory.md                      Implementation history
+└── memory.md           Implementation history and validation results
 ```
 
 The user-directed [SDD Markdown plan](churn_prediction_spec_driven_plan.md) guides this work. [Copilot_context](Copilot_context) now follows the implemented SDD table names and PR-AUC metric. The bundled PDF has not been updated alongside the Markdown snapshot amendments.
