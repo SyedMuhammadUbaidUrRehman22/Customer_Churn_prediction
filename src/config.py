@@ -33,3 +33,20 @@ BUSINESS_ACCEPTANCE = {
     "stakeholder_approved": False,
 }
 
+# Deployment is opt-in. No setting grants model or stakeholder approval.
+APP_ENV = os.getenv("APP_ENV", "development")
+DEPLOYMENT_SCHEMA_PATH = PROJECT_ROOT / "sql" / "07_create_deployment_runs.sql"
+PRODUCTION_STATE_SCHEMA_PATH = PROJECT_ROOT / "sql" / "08_create_production_state.sql"
+PRODUCTION = {
+    "feature_set_version": os.getenv("PRODUCTION_FEATURE_SET_VERSION", ""),
+    "model_id": os.getenv("PRODUCTION_MODEL_ID") or None,
+    "low_threshold": os.getenv("PRODUCTION_LOW_THRESHOLD", ""),
+    "high_threshold": os.getenv("PRODUCTION_HIGH_THRESHOLD", ""),
+    "output_table": os.getenv("PRODUCTION_OUTPUT_TABLE", TABLE_PREDICTIONS),
+    "publication": os.getenv("PRODUCTION_PUBLICATION", "atomic_replace"),
+    "feature_refresh": os.getenv("PRODUCTION_FEATURE_REFRESH", "external"),
+    "alert_mode": os.getenv("DEPLOY_ALERT_MODE", "logging"),
+    "schedule_enabled": os.getenv("DEPLOY_SCHEDULE_ENABLED", "false"),
+    "schedule_cron": os.getenv("DEPLOY_SCHEDULE_CRON", ""),
+}
+

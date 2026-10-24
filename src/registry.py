@@ -6,6 +6,7 @@ import hashlib
 from io import BytesIO
 import json
 from pathlib import Path
+import platform
 import re
 
 import joblib
@@ -28,23 +29,69 @@ METRICS = {
 }
 
 
-def load_artifacts(path, expected_report_sha256=None):
+def _validate_production_report(report, registry):
+    if registry.get("approved") != 1 or registry.get("evaluation_scope") != "production":
+        raise ValueError("Production requires an approved production registry model")
+    version = registry.get("feature_set_version")
+    if not isinstance(version, str) or not version.strip() or version == FEATURE_SET_VERSION:
+        raise ValueError("Production requires a compatible non-benchmark feature version")
+    if (report.get("approved") is not True or report.get("evaluation_scope") != "production"
+            or report.get("evaluation_design") != "temporal" or report.get("promotion_blockers") != []):
+        raise ValueError("Production artifacts require temporal evaluation and no promotion blockers")
+    for name in ("feature_set_version", "label_version", "dataset_sha256"):
+        if not registry.get(name) or report.get(name) != registry[name]:
+            raise ValueError(f"Production report/registry mismatch: {name}")
+    if report["label_version"] == LABEL_VERSION:
+        raise ValueError("Snapshot outcome labels cannot support a production model")
+    trained_at = datetime.fromisoformat(report["trained_at"])
+    if (trained_at.tzinfo is None
+            or trained_at.astimezone(timezone.utc).replace(tzinfo=None) != registry.get("trained_at")):
+        raise ValueError("Production report/registry training timestamp mismatch")
+    if any(report.get("test", {}).get(metric) != registry.get(column)
+           for column, metric in METRICS.items()):
+        raise ValueError("Production report/registry held-out metrics mismatch")
+    acceptance = report.get("production_acceptance", {})
+    if (not isinstance(acceptance, dict) or acceptance.get("temporal_evaluation") is not True
+            or acceptance.get("stakeholder_approved") is not True
+            or type(acceptance.get("future_window_days")) is not int
+            or acceptance["future_window_days"] <= 0
+            or not isinstance(acceptance.get("evidence_reference"), str)
+            or not acceptance["evidence_reference"].strip()):
+        raise ValueError("Production requires documented temporal, future-window, and stakeholder acceptance")
+    low, high = acceptance.get("low_threshold"), acceptance.get("high_threshold")
+    if (type(low) not in (int, float) or type(high) not in (int, float)
+            or not np.isfinite([low, high]).all() or not 0 < low < high <= 1
+            or low != registry.get("low_threshold") or high != registry.get("high_threshold")):
+        raise ValueError("Production risk policy differs from accepted registry thresholds")
+
+
+def load_artifacts(path, expected_report_sha256=None, *, production_registry=None):
     """Hashes detect changes after registration; initial artifacts must be trusted."""
+    if production_registry is not None:
+        pinned_hash = production_registry.get("report_sha256", "")
+        if (not re.fullmatch(r"[0-9a-f]{64}", pinned_hash)
+                or expected_report_sha256 not in (None, pinned_hash)):
+            raise ValueError("Production artifacts require the registry's pinned report hash")
+        expected_report_sha256 = pinned_hash
     path = Path(path).resolve()
     report_bytes = (path / "report.json").read_bytes()
     report_hash = hashlib.sha256(report_bytes).hexdigest()
     if expected_report_sha256 is not None and report_hash != expected_report_sha256:
         raise ValueError("Registered report hash mismatch")
     report = json.loads(report_bytes)
-    if (report.get("feature_set_version") != FEATURE_SET_VERSION
-            or report.get("label_version") != LABEL_VERSION
-            or report.get("features") != list(FEATURE_COLUMNS)):
-        raise ValueError("Artifact feature/label version or ordered feature list mismatch")
-    if report.get("approved") is not False or not report.get("evaluation_design", "").startswith("non-temporal"):
-        raise ValueError("Only unapproved snapshot benchmark artifacts are supported")
-    threshold = report.get("threshold")
-    if not isinstance(threshold, (int, float)) or not np.isfinite(threshold) or not 0 < threshold <= 1:
-        raise ValueError("Benchmark threshold must be finite and in (0, 1]")
+    if report.get("features") != list(FEATURE_COLUMNS):
+        raise ValueError("Artifact ordered feature list mismatch")
+    if production_registry is None:
+        if (report.get("feature_set_version") != FEATURE_SET_VERSION
+                or report.get("label_version") != LABEL_VERSION):
+            raise ValueError("Artifact feature/label version mismatch")
+        if report.get("approved") is not False or not report.get("evaluation_design", "").startswith("non-temporal"):
+            raise ValueError("Only unapproved snapshot benchmark artifacts are supported")
+        threshold = report.get("threshold")
+        if not isinstance(threshold, (int, float)) or not np.isfinite(threshold) or not 0 < threshold <= 1:
+            raise ValueError("Benchmark threshold must be finite and in (0, 1]")
+    else:
+        _validate_production_report(report, production_registry)
     for name in METRICS.values():
         value = report.get("test", {}).get(name)
         if not isinstance(value, (int, float)) or not np.isfinite(value) or not 0 <= value <= 1:
@@ -56,6 +103,8 @@ def load_artifacts(path, expected_report_sha256=None):
         raise ValueError("Training timestamp must include a timezone")
     versions = {"xgboost": xgboost.__version__, "sklearn": sklearn.__version__,
                 "pandas": pd.__version__, "numpy": np.__version__}
+    if production_registry is not None:
+        versions.update(python=platform.python_version(), joblib=joblib.__version__)
     if any(report.get("versions", {}).get(name) != version for name, version in versions.items()):
         raise ValueError("Artifact dependency versions differ; use the training environment")
     contents = {}

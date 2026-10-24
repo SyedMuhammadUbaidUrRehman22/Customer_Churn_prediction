@@ -63,7 +63,10 @@ def validate_feature_frame(frame):
             if not values.isin(CATEGORIES[column]).all():
                 raise ValueError(f"Invalid categories in {column}")
         else:
-            values = pd.to_numeric(values, errors="raise").dropna().astype(float)
+            try:
+                values = pd.to_numeric(values, errors="raise").dropna().astype(float)
+            except (TypeError, ValueError, OverflowError):
+                raise ValueError(f"Invalid numeric values in {column}") from None
             if not np.isfinite(values).all() or values.lt(0).any():
                 raise ValueError(f"Invalid numeric values in {column}")
             if column in ("monthly_charges", "total_charges"):
@@ -74,6 +77,65 @@ def validate_feature_frame(frame):
                 valid = values.isin([0, 1]).all()
             if not valid:
                 raise ValueError(f"Out-of-domain values in {column}")
+
+
+def load_active_customers(connection, observation_date):
+    """Production cohort from real subscription records, never snapshot outcomes."""
+    customers = pd.read_sql_query(text("SELECT customer_id, signup_date FROM customers"), connection)
+    ids = customers.customer_id.astype("string")
+    try:
+        signup = pd.to_datetime(customers.signup_date, errors="raise")
+    except (TypeError, ValueError, OverflowError):
+        raise ValueError("Invalid production customer signup dates") from None
+    if (customers.empty or ids.isna().any() or not ids.is_unique or ids.str.strip().eq("").any()
+            or ids.str.len().gt(20).any() or signup.isna().any()):
+        raise ValueError("Production customers require unique valid IDs and signup dates")
+    subscriptions = pd.read_sql_query(text("""
+        SELECT s.customer_id, s.status, s.start_date, s.end_date, c.signup_date
+        FROM subscriptions s LEFT JOIN customers c ON c.customer_id = s.customer_id
+    """), connection)
+    try:
+        starts = pd.to_datetime(subscriptions.start_date, errors="raise")
+        ends = pd.to_datetime(subscriptions.end_date, errors="raise")
+        signup = pd.to_datetime(subscriptions.signup_date, errors="raise")
+    except (TypeError, ValueError, OverflowError):
+        raise ValueError("Invalid production subscription dates") from None
+    if (signup.isna().any() or starts.isna().any() or starts.lt(signup).any()
+            or not subscriptions.status.isin(["active", "cancelled", "paused"]).all()
+            or (ends.notna() & ends.lt(starts)).any()):
+        raise ValueError("Invalid production subscription source")
+    cutoff = pd.Timestamp(observation_date)
+    active = subscriptions.loc[subscriptions.status.eq("active") & starts.le(cutoff)
+                               & (ends.isna() | ends.gt(cutoff)), "customer_id"]
+    # Multiple active subscriptions still represent one intended customer.
+    active = active.drop_duplicates().sort_values().reset_index(drop=True)
+    if (active.empty or active.isna().any() or active.astype(str).str.strip().eq("").any()
+            or active.astype(str).str.len().gt(20).any()):
+        raise ValueError("A nonempty, valid active-customer population is required")
+    return active.astype(str).tolist()
+
+
+def refresh_production_features(connection, feature_version, observation_date, active_ids):
+    """Consume an external ETL's complete dated materialization in this read snapshot.
+
+    Dated ETL is a separate job: the undated CSV materializer cannot implement it.
+    This boundary never invents dates, reads labels, or writes snapshot features.
+    """
+    if not feature_version or feature_version == FEATURE_SET_VERSION:
+        raise ValueError("Production feature refresh rejects the Telco benchmark")
+    frame = pd.read_sql_query(text(f"""
+        SELECT customer_id, {', '.join(FEATURE_COLUMNS)} FROM {TABLE_FEATURES}
+        WHERE feature_set_version = :version AND observation_date = :observation_date
+        ORDER BY customer_id
+    """), connection, params={"version": feature_version, "observation_date": observation_date})
+    validate_feature_frame(frame)
+    frame["customer_id"] = frame.customer_id.astype(str)
+    if not set(active_ids).issubset(frame.customer_id):
+        raise ValueError("Production feature coverage is incomplete for active customers")
+    frame = frame[frame.customer_id.isin(active_ids)].copy().sort_values("customer_id").reset_index(drop=True)
+    validate_feature_frame(frame)
+    frame[NUMERIC] = frame[NUMERIC].astype(float)
+    return frame
 
 
 def _validate_counts(customer_rows, feature_rows, total_charge_nulls):

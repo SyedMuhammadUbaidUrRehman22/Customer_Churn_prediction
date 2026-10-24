@@ -213,3 +213,31 @@ Append one entry after every implementation iteration. Record what changed, deci
 ### Next step
 
 - The Phase 6 analysis layer is implemented, but actual business acceptance remains blocked on stakeholder metric thresholds, outreach capacity/costs, cadence, tier policy, and documented sign-off. Obtain these decisions and the dated features/events, future-window labels, temporal evaluation, and verified active cohort required for production approval before proceeding to Phase 7 deployment; address the outstanding foundation findings as well.
+
+## Iteration 8 — 2026-10-24 — Phase 7 deployment completion and verification
+
+### Work completed
+
+- Read the full SDD and memory, then resumed the existing uncommitted Phase 7 infrastructure instead of treating its documentation as completed verification. Used three subagents for independent review, deployment transaction tests, and production source/feature tests; the review agent also added an isolated MySQL integration test.
+- Completed verification of `src.deploy`: explicit production configuration, approved-model/artifact gates, dated active-customer feature loading, atomic prediction/state/history publication, deterministic reruns, failure-stage records and alert hooks, model switching, and lineage rollback. Operational schemas and the disabled-by-default cron wrapper remain separate from the development snapshot pipeline.
+- Fixed benchmark scoring in `APP_ENV=production` to fail before opening a database connection. Wrapped numeric and source-date parsing failures so rejected cell values do not appear in deployment errors. Fixed explicit deployment database URI routing through the shared engine helper, retaining the default behavior for existing callers.
+- Corrected an accidental `moCREATE` prefix in the existing label schema. This restores valid SQL; it does not fix the previously recorded nullable-date constraint finding.
+- Added `tests/test_deploy.py`, `tests/test_production_features.py`, and opt-in `tests/test_deploy_mysql.py`, alongside the existing Phase 7 artifact/prediction tests. Extended benchmark environment and database-helper regressions. Updated the deployment guide and SDD with the actual verification boundary. No dependencies were added.
+
+### Validation
+
+- `python -m unittest discover -s tests -v`: 37 discovered, 34 passed, 3 opt-in MySQL tests skipped. Python 3.13 emitted SQLite date/datetime adapter deprecation warnings; no test failed.
+- `RUN_DEPLOY_MYSQL_TESTS=1 python -m unittest tests.test_deploy_mysql -v`: 1 passed on MySQL 8.0.46, using the existing pinned MySQL Connector driver. The fixture created and removed only its own UUID-named database. Real InnoDB schemas, source reads, locks, SQL publication, timestamp-preserving reruns, post-insert failure rollback, model switching/rollback, persisted failure alerts, and a missing-source-column gate were exercised. Artifact loading and inference were stubbed with synthetic outputs; independent artifact tests cover integrity and acceptance checks.
+- Read-only application database audit: 7,043 rows each in `customers_raw`, `churn_labels`, `feature_store`, and `model_predictions`; one registry model with `evaluation_scope='benchmark'`, `approved=0`. No application data refresh, rescore, retraining, approval, or production deployment was performed.
+- Local regressions cover exact dated feature/version selection without labels, unique active subscriptions and date boundaries, invalid inactive/orphaned source records, coverage/domain/null-rate failures, suppressed private parsing values, every deployment failure stage, preservation of the previous publication/state, corrupted reused predictions, revoked/tampered rollback targets, and alert-provider failures.
+- The existing Phase 5/6 live integration suites were not rerun. Concurrent workers, a million-customer SLA, installed cron, real alert delivery, and genuine production model inference remain unverified.
+
+### Decisions and remaining gates
+
+- Phase 7 deployment infrastructure is implemented and verified within the synthetic test boundary. Actual production activation remains blocked on real dated sources and point-in-time ETL/schema, future-window labels and temporal evaluation, stakeholder acceptance, an approved compatible model, and operational ownership.
+- Event-source table checks establish required schema and transactional storage; the upstream ETL remains responsible for event content quality and point-in-time provenance. A dated materialized feature row alone does not prove temporal correctness.
+- `telco_snapshot_v1` remains an unapproved benchmark. No business thresholds, tier acceptance, refresh cadence, churn horizon, or stakeholder sign-off were invented. The outstanding foundation findings R1/R2/R4/R5/R6 remain open.
+
+### Next step
+
+- Phase 8 monitoring: first define and implement retained dated scoring-cohort and reference-feature history, since the latest-only prediction table and deployment metadata cannot reconstruct historical realized performance after replacement. Then add reproducible feature-distribution drift and matured-cohort precision/recall reporting, with retraining cadence/floors left unresolved until stakeholders supply them. Keep snapshot demonstrations explicit and production activation gated; address the foundation findings before production use.

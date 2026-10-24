@@ -4,7 +4,7 @@
 
 A Python + MySQL churn project developed against a [spec-driven plan](churn_prediction_spec_driven_plan.md). It includes ingestion, labels, 19 predictors, an evaluated XGBoost snapshot benchmark, and MySQL model registration and benchmark scoring.
 
-**Current scope:** through Phase 6 analysis (benchmark only; business acceptance pending) · **Dataset:** Telco customer snapshot · **Version:** `telco_snapshot_v1`
+**Current scope:** Phase 7 deployment infrastructure (actual production deployment blocked; business acceptance pending) · **Dataset:** Telco customer snapshot · **Version:** `telco_snapshot_v1`
 
 [Quick start](#quick-start) · [Pipeline](#explore-the-pipeline) · [Data dictionary](#data-dictionary) · [Verification](#verify-results) · [Review](#review-findings) · [Roadmap](#roadmap)
 
@@ -30,6 +30,7 @@ All 7,043 customers join across raw data, labels, and features. The audit found 
 | Understand the tables and fields | [Data dictionary](#data-dictionary) |
 | Query the current snapshot | [Verify results](#verify-results) |
 | Review correctness and remaining gaps | [Phase 0–3 review](docs/phase_0_3_review.md) |
+| Configure the gated production runner and scheduler | [Phase 7 deployment](docs/phase_7_deployment.md) |
 | See implementation history | [Project memory](memory.md) |
 | Understand planned modeling and acceptance gates | [SDD plan](churn_prediction_spec_driven_plan.md) |
 
@@ -209,7 +210,7 @@ The 11 missing total-charge values are preserved in MySQL. Training uses train-o
 .\venv\Scripts\python.exe -m src.ingest --validate-only
 ```
 
-Current result: **14 local tests passed**; both MySQL tests are opt-in. Phase 6's MySQL integration passed in this iteration; Phase 5's passed in its recorded iteration. Coverage includes business scenario formulas, deterministic ranking, pending approval, stale/mismatched sources, artifact tampering, tier boundaries, production refusal, training-to-registry ordering, and prediction rollback/model isolation. Raw ingestion rollback and all invalid-input cases are not covered.
+Coverage includes business scenario formulas, deterministic ranking, pending approval, stale/mismatched sources, artifact tampering, tier boundaries, production gates, training-to-registry ordering, prediction rollback/model isolation, and Phase 7 deployment safeguards. MySQL integration tests are opt-in; [memory.md](memory.md) records the completed validation results. Raw ingestion rollback and all invalid-input cases are not covered.
 
 The live integration check registers and scores the trusted benchmark in the configured development database. It verifies reruns and rollback, and leaves completed benchmark scores available:
 
@@ -325,8 +326,8 @@ Inspect row counts in all three tables before using their contents. Raw ingestio
 | 4 · Modeling | XGBoost snapshot benchmark trained and evaluated | Temporal data and stakeholder acceptance gates |
 | 5 · Registry and scoring | Unapproved model registered; 7,043 benchmark scores stored | Approved temporal model, active-customer source, business tiers |
 | 6 · Business validation | Reproducible report, ranked customers, scenario analysis, pending MySQL records | Stakeholder thresholds, capacity, costs, cadence, and sign-off remain unresolved |
-| 7 · Deployment | Not started | Scheduling, alerting, and rollback validation |
-| 8 · Monitoring | Not started | Realized outcomes, drift metrics, retraining policy |
+| 7 · Deployment | Infrastructure verified locally and in isolated MySQL: atomic publication, run history, alerts, rollback, configurable cron | Actual production blocked on dated source/ETL integration, temporal model, business acceptance, and operational activation |
+| 8 · Monitoring | Next: retain dated cohorts and reference features | Matured outcomes, drift metrics, stakeholder retraining policy |
 
 Phase 4 follows the snapshot amendment in SDD Section 5.2. Production temporal requirements remain unmet. See the [evaluation report](docs/phase_4_evaluation.md).
 
@@ -357,7 +358,18 @@ Runs save `model.json`, `preprocessor.joblib`, `report.json`, and `splits.csv`. 
 
 This writes a Markdown report, exact JSON, and ranked customer CSV under `models/phase6_business_validation/`, and saves four pending outreach scenarios in `business_validation`. Omit `--save` for database reads only; use repeatable `--top-k N` for additional scenarios and `--report-path PATH.md` for another output location.
 
-The report distinguishes saved held-out metrics from full-snapshot outreach/tier statistics, which include training customers. Candidate business criteria live in `BUSINESS_ACCEPTANCE` in `src/config.py`; unresolved values are `None`. Configured criteria never approve the benchmark. See the [Phase 6 workflow and validation evidence](docs/phase_6_business_validation.md) for formulas, persistence, stakeholder decisions, and blockers before Phase 7.
+The report distinguishes saved held-out metrics from full-snapshot outreach/tier statistics, which include training customers. Candidate business criteria live in `BUSINESS_ACCEPTANCE` in `src/config.py`; unresolved values are `None`. Configured criteria never approve the benchmark. See the [Phase 6 workflow and validation evidence](docs/phase_6_business_validation.md) for formulas, persistence, stakeholder decisions, and production blockers.
+
+### Production deployment infrastructure
+
+After configuring the production prerequisites in [.env.example](.env.example), the production entry point is:
+
+```powershell
+$env:APP_ENV = 'production'
+.\venv\Scripts\python.exe -m src.deploy --as-of YYYY-MM-DD
+```
+
+Replace the date with a genuine external ETL observation date. The current Telco snapshot cannot pass production preflight. The runner requires an approved temporal model, documented business acceptance, real source tables, an active-customer cohort, and compatible dated features. It never promotes the benchmark. Separate `--init-schema` setup, model selection, atomic publication, rollback, alerts, disabled-by-default cron scheduling, and remaining integration gates are documented in the [Phase 7 deployment guide](docs/phase_7_deployment.md). `run_pipeline.py` remains the development snapshot refresh command.
 
 ### Register and score the benchmark
 
@@ -411,7 +423,10 @@ churn-analytics/
 │   ├── 02_create_labels.sql        Snapshot labels
 │   ├── 03_create_feature_store.sql Snapshot predictors
 │   ├── 04_create_model_registry.sql Model audit records
-│   └── 05_create_model_predictions.sql Scored benchmark rows
+│   ├── 05_create_model_predictions.sql Benchmark/production predictions
+│   ├── 06_create_business_validation.sql Pending review scenarios
+│   ├── 07_create_deployment_runs.sql Deployment attempt history
+│   └── 08_create_production_state.sql Active production model/run
 ├── src/
 │   ├── config.py                  Paths, versions, environment lookup
 │   ├── utils.py                   SQLAlchemy engine helper
@@ -420,9 +435,13 @@ churn-analytics/
 │   ├── features.py                Feature materialization
 │   ├── train.py                   XGBoost benchmark and evaluation
 │   ├── registry.py                Artifact verification and registration
-│   └── score.py                   Gated snapshot batch scoring
+│   ├── score.py                   Shared prediction writer and benchmark scoring
+│   ├── business_validation.py     Benchmark business-review analysis
+│   └── deploy.py                  Gated production orchestration and rollback
+├── ops/deploy-cron.sh              Disabled-until-configured scheduler entry point
 ├── tests/                         Local regressions and opt-in MySQL integration
 ├── docs/phase_0_3_review.md         Review and evidence
+├── docs/phase_7_deployment.md       Production contract and operations guide
 ├── run_pipeline.py                Phase 1–3 orchestration
 ├── requirements.txt               Pinned runtime dependencies
 ├── churn_prediction_spec_driven_plan.md

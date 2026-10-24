@@ -286,9 +286,24 @@ CREATE TABLE model_predictions (
 - Model promotion is a manual or automated gate: a new model only flips `approved = 1` after passing Section 6.3 thresholds against the previous production model as a baseline (challenger vs. champion).
 - Rollback plan: keep the prior approved model's artifact and registry row so scoring can revert if the new model underperforms in production.
 
+### Phase 7 deployment infrastructure amendment (2026-09-26)
+
+`APP_ENV=production python -m src.deploy --as-of YYYY-MM-DD` provides fail-closed production orchestration: configuration/schema/model preflight, real-source and active-customer validation, consumption of an external ETL's exact dated feature materialization, verified approved-model inference without labels, complete-batch validation, and transactional publication. It reuses the existing database, feature-validation, artifact-loading, risk-tier, and prediction-writing components. `--init-schema` creates operational tables separately from scoring because MySQL DDL implicitly commits.
+
+`deployment_runs` records attempts, stages, selected model/version/training time, artifact and snapshot hashes, counts, outcomes, and rollback lineage. A locked singleton `production_state` row plus the existing registry-row lock serialize production model selection and publication. Predictions, active state, and successful run metadata commit together; failed runs preserve the prior production batch, return nonzero, record failure where the database is available, and emit structured alerts through an injectable sink. Identical batches reuse predictions and scoring timestamps while logging each attempt.
+
+Only already approved production models with compatible temporal/business-acceptance evidence and verified artifacts/dependencies can be selected. The active model stays pinned; bootstrap selection is deterministic by training timestamp then model ID. `--model-id` switches to another already approved model after full validation. `--rollback` verifies and re-scores with the previous distinct model in successful deployment lineage, records a new rollback event, and preserves immutable registry/artifact/history records. These commands never grant model approval or relax the benchmark CHECK constraint.
+
+A runnable cron wrapper invokes production `--scheduled` execution; scheduling defaults to disabled with no invented cadence. Runtime configuration, the external dated-source/feature contract, alert integration, failure handling, rollback, and tests are documented in `docs/phase_7_deployment.md`. The feature-refresh stage consumes external point-in-time ETL output; it cannot implement unknown business event transformations from the undated CSV. Production source integration, dated schema/ETL, genuine future-window training and temporal evaluation, stakeholder acceptance, operational alert ownership, and a real approved model remain required before activation. **Deployment infrastructure is implemented; actual production deployment remains blocked.** `telco_snapshot_v1` remains an unapproved benchmark and cannot enter production.
+
+Verification completed 2026-10-24: 34 local tests passed (three MySQL integrations skipped by default), and the isolated Phase 7 MySQL integration passed separately. The latter exercises real synthetic-source reads, InnoDB publication, reruns, failure rollback, model rollback, and schema rejection in a disposable database, with artifact loading/inference stubbed. Concurrent execution, scale/SLA, scheduler installation, real alert delivery, and production inference remain unverified. See `memory.md` Iteration 8 for evidence and remaining gates.
+
 ---
 
 ## 9. Monitoring & Retraining Specification
+
+Phase 8 is next. Retain dated scoring-cohort predictions and reference features before computing historical drift or realized performance: `model_predictions` holds only the latest production batch, while deployment history stores metadata rather than historical customer scores. Future-window outcomes must mature before performance evaluation; the undated Telco outcome cannot supply this evidence. Stakeholder retraining cadence and degradation floors remain unresolved.
+
 - **Data drift:** monitor feature distributions (e.g., mean/variance of key features) week over week.
 - **Performance drift:** once true churn outcomes are known for a scored cohort, compute realized precision/recall and compare to training-time metrics.
 - **Retraining trigger:** scheduled (e.g., monthly) or drift-triggered if realized precision drops below an agreed floor.
@@ -307,7 +322,7 @@ CREATE TABLE model_predictions (
 | 4 — Model Development | Trained XGBoost model + evaluation report | Time-based split; hyperparameter search; evaluate against Section 6 thresholds |
 | 5 — Registry & Scoring | `model_registry`, `model_predictions` tables live | Implement training→registry write; implement scoring job |
 | 6 — Validation with Business | Sign-off on acceptance thresholds | Review top-N list with retention team; adjust threshold/risk tiers |
-| 7 — Deployment | Scheduled pipeline in production | Orchestration (cron/Airflow/etc.), alerting, rollback tested |
+| 7 — Deployment | Deployment infrastructure implemented; production activation blocked | Gated runner, configurable cron, atomic publication, alert hooks, rollback and safeguard tests; real dated data/ETL and approved model/business gates still required |
 | 8 — Monitoring & Iteration | Drift dashboard, retraining cadence | Track realized performance; define retraining trigger; plan v2 features |
 
 ---

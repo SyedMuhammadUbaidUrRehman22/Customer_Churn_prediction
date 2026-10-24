@@ -4,12 +4,13 @@ import argparse
 from datetime import datetime, timezone
 import hashlib
 import json
+import re
 
 import numpy as np
 import pandas as pd
 from sqlalchemy import text
 
-from src.config import (FEATURE_SET_VERSION, TABLE_FEATURES, TABLE_PREDICTIONS,
+from src.config import (APP_ENV, FEATURE_SET_VERSION, TABLE_FEATURES, TABLE_PREDICTIONS,
                         TABLE_RAW, TABLE_REGISTRY)
 from src.features import FEATURE_COLUMNS, NUMERIC, validate_feature_frame
 from src.registry import load_artifacts
@@ -27,19 +28,83 @@ def risk_tiers(probabilities, low_threshold, high_threshold):
                     np.where(probabilities >= low_threshold, "medium", "low"))
 
 
-def write_predictions(connection, model_id, frame, probabilities, low_threshold, high_threshold, snapshot_sha256):
-    """Caller owns the transaction and registry row lock; replace only this model's benchmark."""
+def predict_probabilities(model, preprocess, frame):
+    """Shared label-free inference for validated benchmark or production features."""
+    return model.predict_proba(preprocess.transform(frame[list(FEATURE_COLUMNS)]))[:, 1]
+
+
+def build_prediction_frame(model_id, frame, probabilities, low_threshold, high_threshold,
+                           snapshot_sha256, scoring_mode="benchmark",
+                           feature_version=FEATURE_SET_VERSION, scored_at=None):
     tiers = risk_tiers(probabilities, low_threshold, high_threshold)
     if frame.empty or len(frame) != len(tiers) or not frame.customer_id.is_unique:
         raise ValueError("Prediction rows must cover unique customers exactly once")
-    scored_at = datetime.now(timezone.utc).replace(tzinfo=None)
-    rows = [{"customer_id": customer_id, "model_id": model_id, "scoring_mode": "benchmark",
-             "scored_at": scored_at, "feature_set_version": FEATURE_SET_VERSION,
-             "feature_snapshot_sha256": snapshot_sha256, "churn_probability": float(probability),
-             "risk_tier": tier}
-            for customer_id, probability, tier in zip(frame.customer_id, probabilities, tiers)]
-    connection.execute(text(f"DELETE FROM {TABLE_PREDICTIONS} "
-                            "WHERE model_id = :model_id AND scoring_mode = 'benchmark'"), {"model_id": model_id})
+    if scoring_mode not in ("benchmark", "production"):
+        raise ValueError("Invalid scoring mode")
+    scored_at = datetime.now(timezone.utc).replace(tzinfo=None) if scored_at is None else scored_at
+    return pd.DataFrame({"customer_id": frame.customer_id.to_numpy(), "model_id": model_id,
+                         "scoring_mode": scoring_mode, "scored_at": scored_at,
+                         "feature_set_version": feature_version,
+                         "feature_snapshot_sha256": snapshot_sha256,
+                         "churn_probability": np.asarray(probabilities, dtype=float), "risk_tier": tiers})
+
+
+def validate_prediction_batch(predictions, intended_ids, model_id, feature_version,
+                              snapshot_sha256, low_threshold, high_threshold, scored_at):
+    """Require one complete production batch before publication and after SQL writes."""
+    required = {"customer_id", "model_id", "scoring_mode", "scored_at", "feature_set_version",
+                "feature_snapshot_sha256", "churn_probability", "risk_tier"}
+    if (not required.issubset(predictions.columns) or predictions.empty
+            or predictions[list(required)].isna().any().any()):
+        raise ValueError("Prediction batch has missing rows, columns, or values")
+    intended = pd.Series(list(intended_ids), dtype=object)
+    actual = predictions.customer_id
+    if (intended.empty or intended.isna().any() or not intended.is_unique
+            or intended.astype(str).str.strip().eq("").any() or not actual.is_unique
+            or len(actual) != len(intended) or set(actual) != set(intended)):
+        raise ValueError("Prediction batch must cover exactly the intended unique active customers")
+    if (not isinstance(model_id, str) or not model_id or len(model_id) > 50
+            or not isinstance(feature_version, str) or not feature_version.strip()
+            or feature_version == FEATURE_SET_VERSION
+            or not isinstance(snapshot_sha256, str) or not re.fullmatch(r"[0-9a-f]{64}", snapshot_sha256)):
+        raise ValueError("Production prediction metadata is invalid or uses benchmark features")
+    for column, expected in (("model_id", model_id), ("scoring_mode", "production"),
+                             ("feature_set_version", feature_version),
+                             ("feature_snapshot_sha256", snapshot_sha256)):
+        if not predictions[column].eq(expected).all():
+            raise ValueError(f"Prediction batch metadata mismatch: {column}")
+    timestamps = pd.to_datetime(predictions.scored_at, errors="coerce", utc=True)
+    expected_time = pd.to_datetime(scored_at, errors="coerce", utc=True)
+    if pd.isna(expected_time) or timestamps.isna().any() or not timestamps.eq(expected_time).all():
+        raise ValueError("Prediction scoring timestamp is missing or inconsistent")
+    tiers = risk_tiers(predictions.churn_probability, low_threshold, high_threshold)
+    if not np.array_equal(predictions.risk_tier.to_numpy(), tiers):
+        raise ValueError("Prediction risk tiers differ from the production policy")
+
+
+def write_predictions(connection, model_id, frame, probabilities, low_threshold, high_threshold,
+                      snapshot_sha256, *, scoring_mode="benchmark", feature_version=FEATURE_SET_VERSION,
+                      scored_at=None):
+    """Caller owns transaction/locks; production replaces the single complete active batch."""
+    predictions = build_prediction_frame(model_id, frame, probabilities, low_threshold, high_threshold,
+                                         snapshot_sha256, scoring_mode, feature_version, scored_at)
+    if scoring_mode == "production":
+        validate_prediction_batch(predictions, frame.customer_id, model_id, feature_version,
+                                  snapshot_sha256, low_threshold, high_threshold, predictions.scored_at.iloc[0])
+        registry = connection.execute(text(f"SELECT approved, evaluation_scope, feature_set_version "
+                                            f"FROM {TABLE_REGISTRY} WHERE model_id = :model_id"),
+                                      {"model_id": model_id}).mappings().first()
+        if (registry is None or registry["approved"] != 1 or registry["evaluation_scope"] != "production"
+                or registry["feature_set_version"] != feature_version):
+            raise ValueError("Production publication requires an approved compatible production model")
+        connection.execute(text(f"DELETE FROM {TABLE_PREDICTIONS} WHERE scoring_mode = 'production'"))
+    else:
+        connection.execute(text(f"DELETE FROM {TABLE_PREDICTIONS} "
+                                "WHERE model_id = :model_id AND scoring_mode = 'benchmark'"), {"model_id": model_id})
+    rows = predictions.to_dict(orient="records")
+    score_time = pd.to_datetime(predictions.scored_at.iloc[0], utc=True).to_pydatetime().replace(tzinfo=None)
+    for row in rows:
+        row["scored_at"] = score_time
     columns = ", ".join(rows[0])
     placeholders = ", ".join(f":{column}" for column in rows[0])
     statement = text(f"INSERT INTO {TABLE_PREDICTIONS} ({columns}) VALUES ({placeholders})")
@@ -49,6 +114,8 @@ def write_predictions(connection, model_id, frame, probabilities, low_threshold,
 
 
 def score_customers(model_id=None, benchmark=False):
+    if benchmark and APP_ENV == "production":
+        raise ValueError("Benchmark scoring is unavailable in APP_ENV=production")
     if benchmark and not model_id:
         raise ValueError("Benchmark scoring requires an explicit model_id")
     engine = get_engine()
@@ -87,7 +154,7 @@ def score_customers(model_id=None, benchmark=False):
                 frame[NUMERIC] = frame[NUMERIC].astype(float)
                 snapshot_hash = hashlib.sha256(frame[["customer_id", *FEATURE_COLUMNS]].to_csv(index=False).encode()).hexdigest()
                 # ponytail: in-memory snapshot suits 7k rows; chunk reads/inference before a 1M-customer SLA.
-                probabilities = model.predict_proba(preprocess.transform(frame[list(FEATURE_COLUMNS)]))[:, 1]
+                probabilities = predict_probabilities(model, preprocess, frame)
                 count = write_predictions(connection, registry["model_id"], frame, probabilities, low, high, snapshot_hash)
         return {"model_id": registry["model_id"], "scoring_mode": "benchmark", "rows": count,
                 "feature_snapshot_sha256": snapshot_hash, "approved": False}

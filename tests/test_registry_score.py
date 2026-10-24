@@ -122,6 +122,8 @@ class RegistryScoringTest(unittest.TestCase):
         with patch("src.score.get_engine") as get_engine:
             with self.assertRaises(ValueError):
                 score_customers(benchmark=True)
+            with patch("src.score.APP_ENV", "production"), self.assertRaisesRegex(ValueError, "APP_ENV=production"):
+                score_customers(model_id="example", benchmark=True)
             get_engine.assert_not_called()
 
     def test_failed_replacement_rolls_back_and_other_models_modes_survive(self):

@@ -56,6 +56,12 @@ class TrainingTest(unittest.TestCase):
             with patch("src.utils.DATABASE_URI", f"mysql+{driver}://localhost/test"), patch("src.utils.create_engine") as create:
                 get_engine()
                 self.assertEqual(create.call_args.kwargs["connect_args"], {keyword: 30})
+        override = "mysql+mysqlconnector://test@localhost/explicit_test_db"
+        with patch("src.utils.DATABASE_URI", "mysql+pymysql://localhost/default_db"), \
+                patch("src.utils.create_engine") as create:
+            get_engine(override)
+            self.assertEqual(create.call_args.args[0], override)
+            self.assertEqual(create.call_args.kwargs["connect_args"], {"connection_timeout": 30})
 
 
 if __name__ == "__main__":
