@@ -2,7 +2,6 @@
 
 import argparse
 from datetime import date, datetime, timezone
-import hashlib
 import json
 import logging
 import re
@@ -17,6 +16,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from src import config
 from src.features import FEATURE_COLUMNS, load_active_customers, refresh_production_features
+from src.monitoring_history import archive_batch, batch_hash, ensure_schema as ensure_monitoring_schema
 from src.registry import METRICS, ensure_schema as ensure_model_schema, load_artifacts
 from src.score import (build_prediction_frame, predict_probabilities, risk_tiers,
                        validate_prediction_batch, write_predictions)
@@ -115,6 +115,7 @@ def ensure_schema(engine):
             connection.exec_driver_sql(path.read_text(encoding="utf-8").rstrip(";\n"))
         connection.execute(text("INSERT INTO production_state (state_id) VALUES (1) "
                                 "ON DUPLICATE KEY UPDATE state_id = state_id"))
+    ensure_monitoring_schema(engine)
 
 
 def validate_database(connection):
@@ -123,7 +124,8 @@ def validate_database(connection):
     inspector = inspect(connection)
     tables = set(inspector.get_table_names())
     required = {*SOURCE_COLUMNS, config.TABLE_REGISTRY, config.TABLE_PREDICTIONS,
-                "deployment_runs", "production_state"}
+                "deployment_runs", "production_state", config.TABLE_SCORING_BATCHES,
+                config.TABLE_SCORING_HISTORY, config.TABLE_MONITORING_OUTCOMES}
     missing = required - tables
     if missing:
         raise ValueError("Required production source/output tables missing: " + ", ".join(sorted(missing)))
@@ -192,13 +194,6 @@ def save_run(connection, run, insert=False):
                                          "WHERE run_id = :run_id AND status = 'running'"), run)
         if result.rowcount != 1:
             raise ValueError("Deployment run is missing or already terminal; history is immutable")
-
-
-def batch_hash(registry, frame, observation_date, low, high):
-    snapshot_hash = hashlib.sha256(frame[["customer_id", *FEATURE_COLUMNS]].to_csv(index=False).encode()).hexdigest()
-    identity = [registry["model_id"], registry["report_sha256"], registry["feature_set_version"],
-                observation_date.isoformat(), snapshot_hash, low, high]
-    return snapshot_hash, hashlib.sha256(json.dumps(identity, separators=(",", ":")).encode()).hexdigest()
 
 
 def read_predictions(connection):
@@ -307,6 +302,7 @@ def run_deployment(*, model_id=None, rollback=False, observation_date=None, sche
                 stage = "PUBLICATION"
                 run.update(prediction_count=len(stored), completed_at=utcnow(),
                            status="rolled_back" if rollback else "succeeded")
+                archive_batch(connection, run, frame, stored, registry, report, low, high)
                 save_run(connection, run)
                 connection.execute(text("UPDATE production_state SET model_id = :model_id, run_id = :run_id "
                                         "WHERE state_id = 1"), run)

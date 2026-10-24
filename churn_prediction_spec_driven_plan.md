@@ -302,7 +302,15 @@ Verification completed 2026-10-24: 34 local tests passed (three MySQL integratio
 
 ## 9. Monitoring & Retraining Specification
 
-Phase 8 is next. Retain dated scoring-cohort predictions and reference features before computing historical drift or realized performance: `model_predictions` holds only the latest production batch, while deployment history stores metadata rather than historical customer scores. Future-window outcomes must mature before performance evaluation; the undated Telco outcome cannot supply this evidence. Stakeholder retraining cadence and degradation floors remain unresolved.
+### Phase 8 monitoring infrastructure amendment (2026-10-24)
+
+Production publication now retains immutable dated cohort metadata in `scoring_batches` and all validated customer predictors/scores in `scoring_history`, within the same transaction as the active predictions, state, and successful run. An identical batch reuses and verifies its archive. Schema setup runs separately; missing history tables or failed archival blocks publication. Historical evidence survives replacement of the latest production scores.
+
+`python -m src.monitor --as-of YYYY-MM-DD` reads retained history in a consistent snapshot, compares an explicit or nearest earlier compatible feature-version cohort, and writes JSON, Markdown, and an escaped standalone HTML dashboard. Numeric statistics include mean, population standard deviation, null rates, and normalized mean changes with explicit constant-reference handling. Categorical drift uses total variation. No earlier compatible cohort leaves drift pending.
+
+External `monitoring_outcomes` must identify every retained customer, the accepted label version and exact future-window end, observed-through/availability provenance, a verified binary outcome, and source evidence. Realized precision/recall, average precision, Brier score, and top-decile metrics are computed only for a complete matured cohort available by the analysis date. Undefined single-class metrics are explicit nulls; missing outcomes never imply retention. Held-out precision/recall comparisons require the same operating/evaluation threshold.
+
+`MONITORING` in `src/config.py` leaves drift limits, a precision floor, and retraining interval unresolved. Configured breaches or elapsed intervals generate recommendations and structured local alerts; failures also alert and return unsuccessfully. No automatic temporal retraining, model promotion, stakeholder decisions, or schedule activation is fabricated. The existing trainer remains a snapshot benchmark. See `docs/phase_8_monitoring.md` for commands, contracts, policy, tests, and the v2 feature plan. **Monitoring infrastructure is implemented; real production monitoring and temporal retraining remain blocked on genuine cohorts/outcomes, stakeholder policy, and the existing production gates.**
 
 - **Data drift:** monitor feature distributions (e.g., mean/variance of key features) week over week.
 - **Performance drift:** once true churn outcomes are known for a scored cohort, compute realized precision/recall and compare to training-time metrics.
@@ -323,7 +331,7 @@ Phase 8 is next. Retain dated scoring-cohort predictions and reference features 
 | 5 — Registry & Scoring | `model_registry`, `model_predictions` tables live | Implement training→registry write; implement scoring job |
 | 6 — Validation with Business | Sign-off on acceptance thresholds | Review top-N list with retention team; adjust threshold/risk tiers |
 | 7 — Deployment | Deployment infrastructure implemented; production activation blocked | Gated runner, configurable cron, atomic publication, alert hooks, rollback and safeguard tests; real dated data/ETL and approved model/business gates still required |
-| 8 — Monitoring & Iteration | Drift dashboard, retraining cadence | Track realized performance; define retraining trigger; plan v2 features |
+| 8 — Monitoring & Iteration | Cohort history, drift/performance dashboard, configurable retraining recommendations | Retain dated evidence; evaluate complete mature outcomes; operational policy, real sources, temporal retraining and production activation remain gated |
 
 ---
 

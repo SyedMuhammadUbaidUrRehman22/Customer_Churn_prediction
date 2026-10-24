@@ -4,7 +4,7 @@
 
 A Python + MySQL churn project developed against a [spec-driven plan](churn_prediction_spec_driven_plan.md). It includes ingestion, labels, 19 predictors, an evaluated XGBoost snapshot benchmark, and MySQL model registration and benchmark scoring.
 
-**Current scope:** Phase 7 deployment infrastructure (actual production deployment blocked; business acceptance pending) · **Dataset:** Telco customer snapshot · **Version:** `telco_snapshot_v1`
+**Current scope:** Phase 8 cohort retention and monitoring infrastructure (production activation and business acceptance pending) · **Dataset:** Telco customer snapshot · **Version:** `telco_snapshot_v1`
 
 [Quick start](#quick-start) · [Pipeline](#explore-the-pipeline) · [Data dictionary](#data-dictionary) · [Verification](#verify-results) · [Review](#review-findings) · [Roadmap](#roadmap)
 
@@ -31,6 +31,7 @@ All 7,043 customers join across raw data, labels, and features. The audit found 
 | Query the current snapshot | [Verify results](#verify-results) |
 | Review correctness and remaining gaps | [Phase 0–3 review](docs/phase_0_3_review.md) |
 | Configure the gated production runner and scheduler | [Phase 7 deployment](docs/phase_7_deployment.md) |
+| Monitor retained dated cohorts and review retraining recommendations | [Phase 8 monitoring](docs/phase_8_monitoring.md) |
 | See implementation history | [Project memory](memory.md) |
 | Understand planned modeling and acceptance gates | [SDD plan](churn_prediction_spec_driven_plan.md) |
 
@@ -327,7 +328,7 @@ Inspect row counts in all three tables before using their contents. Raw ingestio
 | 5 · Registry and scoring | Unapproved model registered; 7,043 benchmark scores stored | Approved temporal model, active-customer source, business tiers |
 | 6 · Business validation | Reproducible report, ranked customers, scenario analysis, pending MySQL records | Stakeholder thresholds, capacity, costs, cadence, and sign-off remain unresolved |
 | 7 · Deployment | Infrastructure verified locally and in isolated MySQL: atomic publication, run history, alerts, rollback, configurable cron | Actual production blocked on dated source/ETL integration, temporal model, business acceptance, and operational activation |
-| 8 · Monitoring | Next: retain dated cohorts and reference features | Matured outcomes, drift metrics, stakeholder retraining policy |
+| 8 · Monitoring | Atomic cohort history, feature drift, matured-outcome metrics, local dashboard, configurable recommendations | Genuine production cohorts/outcomes, stakeholder policy, temporal retraining, operational activation |
 
 Phase 4 follows the snapshot amendment in SDD Section 5.2. Production temporal requirements remain unmet. See the [evaluation report](docs/phase_4_evaluation.md).
 
@@ -370,6 +371,16 @@ $env:APP_ENV = 'production'
 ```
 
 Replace the date with a genuine external ETL observation date. The current Telco snapshot cannot pass production preflight. The runner requires an approved temporal model, documented business acceptance, real source tables, an active-customer cohort, and compatible dated features. It never promotes the benchmark. Separate `--init-schema` setup, model selection, atomic publication, rollback, alerts, disabled-by-default cron scheduling, and remaining integration gates are documented in the [Phase 7 deployment guide](docs/phase_7_deployment.md). `run_pipeline.py` remains the development snapshot refresh command.
+
+### Monitor retained production cohorts
+
+After operational schema setup and genuine dated production scoring:
+
+```powershell
+.\venv\Scripts\python.exe -m src.monitor --as-of YYYY-MM-DD --output-dir models/phase8_monitoring
+```
+
+Phase 8 archives each validated cohort's features and scores inside the publication transaction. The monitor compares an earlier compatible cohort, waits for complete mature future-window outcomes, and writes JSON, Markdown, and a standalone HTML dashboard. Its policy defaults remain unresolved; configured breaches recommend review/retraining without invoking a trainer or granting model approval. The current undated benchmark cannot supply production monitoring evidence. See the [monitoring guide](docs/phase_8_monitoring.md) for outcome contracts, formulas, policy, test commands, and v2 feature planning.
 
 ### Register and score the benchmark
 
@@ -426,7 +437,10 @@ churn-analytics/
 │   ├── 05_create_model_predictions.sql Benchmark/production predictions
 │   ├── 06_create_business_validation.sql Pending review scenarios
 │   ├── 07_create_deployment_runs.sql Deployment attempt history
-│   └── 08_create_production_state.sql Active production model/run
+│   ├── 08_create_production_state.sql Active production model/run
+│   ├── 09_create_scoring_batches.sql Retained cohort metadata
+│   ├── 10_create_scoring_history.sql Historical features and predictions
+│   └── 11_create_monitoring_outcomes.sql External future-window outcomes
 ├── src/
 │   ├── config.py                  Paths, versions, environment lookup
 │   ├── utils.py                   SQLAlchemy engine helper
@@ -437,11 +451,14 @@ churn-analytics/
 │   ├── registry.py                Artifact verification and registration
 │   ├── score.py                   Shared prediction writer and benchmark scoring
 │   ├── business_validation.py     Benchmark business-review analysis
-│   └── deploy.py                  Gated production orchestration and rollback
+│   ├── deploy.py                  Gated production orchestration and rollback
+│   ├── monitoring_history.py      Atomic immutable cohort archive
+│   └── monitor.py                 Drift, realized metrics, recommendations, reports
 ├── ops/deploy-cron.sh              Disabled-until-configured scheduler entry point
 ├── tests/                         Local regressions and opt-in MySQL integration
 ├── docs/phase_0_3_review.md         Review and evidence
 ├── docs/phase_7_deployment.md       Production contract and operations guide
+├── docs/phase_8_monitoring.md       Cohort/outcome contract and monitoring guide
 ├── run_pipeline.py                Phase 1–3 orchestration
 ├── requirements.txt               Pinned runtime dependencies
 ├── churn_prediction_spec_driven_plan.md

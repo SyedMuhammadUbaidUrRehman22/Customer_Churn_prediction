@@ -82,7 +82,8 @@ class DeploymentMySQLTest(unittest.TestCase):
                                    "observation_date": date(2026, 1, 2),
                                    "feature_set_version": "dated_mysql_test_v1"} for customer_id in ("a", "b")])
             frame.to_sql("feature_store", connection, if_exists="append", index=False)
-        report = {"artifact_sha256": {"model.json": "d" * 64, "preprocessor.joblib": "e" * 64}}
+        report = {"artifact_sha256": {"model.json": "d" * 64, "preprocessor.joblib": "e" * 64},
+                  "production_acceptance": {"future_window_days": 30}, "threshold": 0.5}
         for name, result in (("load_artifacts", (report, None, None, "a" * 64)),
                              ("predict_probabilities", np.array([0.2, 0.8]))):
             patcher = patch(f"src.deploy.{name}", return_value=result)

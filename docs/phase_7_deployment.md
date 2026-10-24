@@ -43,7 +43,7 @@ $env:APP_ENV = 'production'
 .\venv\Scripts\python.exe -m src.deploy --init-schema
 ```
 
-This ensures the existing registry/prediction schemas and the new `deployment_runs`/`production_state` schemas exist. It is repeatable and does not approve any model. MySQL DDL is separate because it implicitly commits. Runtime execution requires the tables to exist and needs read access to source/features/artifacts plus the necessary select/insert/update/delete privileges on operational tables. Configure the URI in a protected process environment, never in a committed scheduler file.
+This ensures registry/prediction, `deployment_runs`/`production_state`, and Phase 8 cohort/outcome schemas exist. It is repeatable and does not approve any model. MySQL DDL is separate because it implicitly commits. Runtime execution requires the tables to exist and needs read access to source/features/artifacts plus the necessary select/insert/update/delete privileges on operational tables. Archival needs select/insert access to retained cohort tables; reporting needs read access, while the external label job owns outcome writes. Configure the URI in a protected process environment, never in a committed scheduler file.
 
 Once all production prerequisites exist, run:
 
@@ -110,7 +110,7 @@ The transaction replaces only rows with `scoring_mode='production'`, then commit
 
 Batch identity includes model/report identity, feature version, observation date, the sorted feature-snapshot hash, and accepted risk boundaries. An identical rerun validates and reuses the existing batch, including its original prediction timestamps; it still records a new execution attempt with `reused_batch=1`. A changed date, model, feature content, or policy produces a new batch. The primary key prevents duplicate customer/model/mode rows. Registry records and artifact files are never overwritten by deployment.
 
-`model_predictions` contains the latest published production batch. `deployment_runs` preserves execution and model lineage, counts, timestamps, as-of date, feature/batch hashes, report/model/preprocessing hashes, previous run ID, rollback target, and terminal outcome. It is metadata history, not an archive of every historical prediction row. The active run supplies the observation date for its prediction snapshot.
+`model_predictions` contains the latest published production batch. `deployment_runs` preserves execution and model lineage, counts, timestamps, as-of date, feature/batch hashes, report/model/preprocessing hashes, previous run ID, rollback target, and terminal outcome. Phase 8 additionally retains the validated cohort metadata, all 19 predictors, scores, and tiers in `scoring_batches`/`scoring_history` inside the same publication transaction. Identical identities verify and reuse their first archive; archival failure blocks publication. Rerun `--init-schema` before deploying this upgrade. See [Phase 8 monitoring](phase_8_monitoring.md) for history and outcome contracts.
 
 ## Failure handling and alerts
 

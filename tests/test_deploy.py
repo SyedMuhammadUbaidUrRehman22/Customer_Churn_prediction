@@ -94,6 +94,7 @@ class DeploymentTest(unittest.TestCase):
         self.mocks = {}
         for name, options in {
             "validate_database": {},
+            "archive_batch": {},
             "load_artifacts": {"return_value": (self.report, self.model, self.preprocessor, "a" * 64)},
             "load_active_customers": {"return_value": self.frame.customer_id.tolist()},
             "refresh_production_features": {"side_effect": lambda *args: self.frame.copy()},
@@ -186,6 +187,9 @@ class DeploymentTest(unittest.TestCase):
             raise ValueError("injected failure after replacement")
 
         with patch("src.deploy.write_predictions", side_effect=write_then_fail):
+            self.assert_failed("PUBLICATION", model_id="model-a")
+        self.assertEqual(self.publication(), original)
+        with patch("src.deploy.archive_batch", side_effect=ValueError("archive unavailable")):
             self.assert_failed("PUBLICATION", model_id="model-a")
         self.assertEqual(self.publication(), original)
 

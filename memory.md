@@ -241,3 +241,33 @@ Append one entry after every implementation iteration. Record what changed, deci
 ### Next step
 
 - Phase 8 monitoring: first define and implement retained dated scoring-cohort and reference-feature history, since the latest-only prediction table and deployment metadata cannot reconstruct historical realized performance after replacement. Then add reproducible feature-distribution drift and matured-cohort precision/recall reporting, with retraining cadence/floors left unresolved until stakeholders supply them. Keep snapshot demonstrations explicit and production activation gated; address the foundation findings before production use.
+
+## Iteration 9 — 2026-10-24 — Phase 8 retained cohorts and monitoring
+
+### Work completed
+
+- Committed and pushed the verified Phase 7 work to GitHub `main` as `ea31724` (`feat: complete gated Phase 7 deployment infrastructure`), then implemented the requested Phase 8 with three subagents covering archive storage, monitoring/reporting, and isolated MySQL integration/review.
+- Added explicit InnoDB `scoring_batches`, `scoring_history`, and `monitoring_outcomes` schemas. Production publication retains model/version/date/horizon/policy/baseline metadata and all 19 validated predictors, probabilities, and tiers in the same transaction as active predictions/state/run success. Duplicate identities verify and reuse their immutable archive; history survives later active-batch replacement and failed publication rolls new archive rows back.
+- Added `src.monitor` with consistent retained-history reads, explicit or nearest earlier compatible reference selection, numeric distribution/null-rate/normalized-mean statistics, categorical total variation, and matured complete-cohort precision/recall, average precision, ROC-AUC, Brier, and deterministic top-decile metrics. Missing, partial, immature, or unavailable outcomes remain pending; no missing outcomes are inferred as negatives.
+- Added deterministic JSON/Markdown and escaped standalone HTML reporting, visible held-out baseline comparisons when thresholds agree, optional policy-based recommendations, and structured local failure/recommendation alerts using the existing alert interface. `MONITORING` defaults all four drift/precision/cadence policies to `None`; recommendations never execute training or approve a model.
+- Added archive/monitor/MySQL regressions; extended deployment publication safeguards and schema setup; updated README, the SDD, legacy file responsibilities, and `docs/phase_8_monitoring.md`, including the external outcome contract and v2 feature plan. No dependencies were added.
+- Independent review found that monitoring initially verified the feature hash without recomputing batch identity. Moved the existing identity calculation into shared `monitoring_history.batch_hash`, reused it across deployment/archive/monitoring, and added model/report/risk-policy tampering regressions before final verification.
+
+### Validation
+
+- `python -m unittest discover -s tests -v`: 49 discovered, 45 passed, 4 opt-in MySQL tests skipped. Existing Python 3.13 SQLite adapter deprecation warnings and a malformed-date negative-test parsing warning were non-failing.
+- `RUN_DEPLOY_MYSQL_TESTS=1 RUN_MONITOR_MYSQL_TESTS=1` with `tests.test_deploy_mysql` and `tests.test_monitor_mysql`: 2 passed on the existing MySQL 8.0.46 runtime after the final integrity fix. Fixtures created and removed only their own UUID databases, with real InnoDB schema/source/archive/publication/rollback/monitoring SQL and stubbed artifact loading/inference.
+- MySQL checks cover rerun archive deduplication, rollback after actual archive inserts preserving previous predictions/state/history, later-dated model switching preserving prior cohorts, independence from replaced source features, pending outcomes, exact mature outcome metrics, report output, and the existing deployment rollback/schema gates.
+- Saved a clearly labelled synthetic example under `models/phase8_validation/`: `report.json`, `report.md`, and `dashboard.html`. The two-customer fixture has realized precision/recall/AP of 1.0 and Brier 0.04; these are synthetic test values, not model evaluation or business acceptance evidence. Its gender distribution changes completely and its constant monthly-charge reference is explicitly flagged as changed. Artifacts remain local and ignored.
+- Local tests also cover constant/zero drift, single-class undefined metrics, label/version/window/provenance/coverage failures, historical availability, source/identity tampering, unresolved/configured recommendations, alert delivery failure, deterministic output, and HTML escaping. Documentation links and Git whitespace checks passed.
+
+### Decisions and remaining gates
+
+- Phase 8 infrastructure is implemented. No production cohort, genuine future outcome, business threshold, cadence, real alert delivery, temporal retraining, or approval was fabricated. The supplied model remains an unapproved snapshot benchmark; the application database was not refreshed, rescored, migrated, or used for synthetic production records.
+- Existing deployments must run separate `src.deploy --init-schema` setup before the next publication; missing archive tables fail closed. External label writers must supply exact completed future-window outcomes with observed-through/availability dates and source evidence. Reporting reads only retained evidence.
+- History is retained without automatic deletion. An owner must define retention/access policy, operating thresholds/cadence, scheduler/alert ownership, and the governed temporal retraining workflow. Scale/SLA, concurrent workers, real production inference, installed scheduling, and external alert delivery remain unverified. Phase 5/6 live suites were not rerun.
+- Outstanding foundation findings R1/R2/R4/R5/R6 remain open; Phase 8 does not repair snapshot ingestion or establish temporal correctness.
+
+### Next step
+
+- Repair the foundation findings with isolated failure/domain/schema regressions, starting with atomic Phase 1–3 refresh and CSV validation. Obtain real dated source/label/ETL contracts and stakeholder horizon/acceptance/tier/cadence decisions, then build genuine temporal training/approval before activating deployment, monitoring, or automated retraining. The supplied undated CSV cannot resolve those production evidence gates.

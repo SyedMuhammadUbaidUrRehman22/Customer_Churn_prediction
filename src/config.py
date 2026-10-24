@@ -50,3 +50,17 @@ PRODUCTION = {
     "schedule_cron": os.getenv("DEPLOY_SCHEDULE_CRON", ""),
 }
 
+SCORING_BATCHES_SCHEMA_PATH = PROJECT_ROOT / "sql" / "09_create_scoring_batches.sql"
+SCORING_HISTORY_SCHEMA_PATH = PROJECT_ROOT / "sql" / "10_create_scoring_history.sql"
+MONITORING_OUTCOMES_SCHEMA_PATH = PROJECT_ROOT / "sql" / "11_create_monitoring_outcomes.sql"
+TABLE_SCORING_BATCHES = "scoring_batches"
+TABLE_SCORING_HISTORY = "scoring_history"
+TABLE_MONITORING_OUTCOMES = "monitoring_outcomes"
+# Unresolved policies produce reports, not invented alert or retraining decisions.
+MONITORING = {
+    "numeric_mean_shift_max": None,
+    "categorical_tv_max": None,
+    "precision_min": None,
+    "retrain_interval_days": None,
+}
+
